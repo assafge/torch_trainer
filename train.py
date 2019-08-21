@@ -4,23 +4,9 @@
 
 import argparse
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from matplotlib import pyplot as plt
 import os
-import numpy as np
-import warnings
-warnings.filterwarnings("ignore", message="TIFFSetField: tempfile.tif:\
- Unknown pseudo-tag 65538.")
-# ours
-#
-# from load_data import SintelDataset
-# from load_data_mb import MotBlurDataset
-# from load_data_mb_patch import MotBlurDataset_ptch
 
-LR0 = 1e-7
 
-# def train(net, optimizer, train_data_loader, test_data_loader,device,num_epochs=10,first_epoch=0):
 def train(net, train_data_loader, test_data_loader,device, args):
     net.to(device)
     batch_size = train_data_loader.batch_size
@@ -148,19 +134,7 @@ def save_model(model, optimizer, train_epochs_loss, val_epochs_loss, epoch, expe
 
 
 
-def load_model(model, optimizer, train_loss, val_loss, device, epoch, experiment_name):
-    print("loading checkpoint")
-    model_name = get_model_name(model) + '_' +experiment_name
-    filename = model_file_name(epoch)
-    model_path = os.path.join('./trained_models', model_name, filename)
 
-    checkpoint = torch.load(model_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    for state in optimizer.state.values():
-        for k, v in state.items():
-            if isinstance(v, torch.Tensor):
-                state[k] = v.to(device)
 
     lossFileName = os.path.join('./trained_models', model_name, "loss_" + str(epoch) + ".out")
     temp = np.loadtxt(lossFileName, delimiter=',')  # X is an array
@@ -169,29 +143,17 @@ def load_model(model, optimizer, train_loss, val_loss, device, epoch, experiment
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description='PyTorch ConvNet Training')
-    parser.add_argument('--load_model', action='stroe_true', default=False,
-                        help='load trained model')
-    parser.add_argument('--train', action='stroe_true', default=True,
-                        help='train model')
-    parser.add_argument('--epochs', type=int, default=300,
-                        help='num of epochs')
-    parser.add_argument('--epoch2continue', type=int, default=-1,
-                        help='epoch2continue')
-    parser.add_argument('--experiment_name', type=str, default='default',
-                        help='exp name')
-    parser.add_argument('--machine', type=str, default='local',
-                        help='machine name')
-    parser.add_argument('--inpMode', type=str, default='full',
-                        help='machine name')
-    parser.add_argument('--data_root', type=str, default='',
-                        help='root directory of the data')
-    parser.add_argument('--data_suf', type=str, default='',
-                        help='data suffix')
-    parser.add_argument('--batch_size', type=int, default=50,
-                        help='batch size')
-    parser.add_argument('--model', default='EDOF', const='EDOF', nargs='?', choices=['EDOF', 'Unet'],
-                        help='model architecture (default: %(default)s)')
+    parser = argparse.ArgumentParser(description='PyTorch training module',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('g', 'gpu_index', help='index of gpu (if exist, torch indexing)', type=int, default=0)
+    new = parser.add_argument_group('new model')
+    new.add_argument('-m', '--model_cfg', help='path to model cfg file')
+    new.add_argument('-o', '--optimizer_cfg', help='path to optimizer cfg file')
+    new.add_argument('-m', '--dataset_cfg', help='path to dataset cfg file')
+    new.add_argument('w', 'output_dir', help='path to output directory')
+    retrain = parser.add_argument_group('warm startup')
+    retrain.add_argument('r', 'model_path', help='path to pre-trained model')
+
     args = parser.parse_args()
     return args
 
