@@ -169,17 +169,29 @@ def load_model(model, optimizer, train_loss, val_loss, device, epoch, experiment
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description='PyTorch training module',
-                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('g', 'gpu_index', help='index of gpu (if exist, torch indexing)', type=int, default=0)
-    new = parser.add_argument_group('new model')
-    new.add_argument('-m', '--model_cfg', help='path to model cfg file')
-    new.add_argument('-o', '--optimizer_cfg', help='path to optimizer cfg file')
-    new.add_argument('-m', '--dataset_cfg', help='path to dataset cfg file')
-    new.add_argument('w', 'output_dir', help='path to output directory')
-    retrain = parser.add_argument_group('warm startup')
-    retrain.add_argument('r', 'model_path', help='path to pre-trained model')
-
+    parser = argparse.ArgumentParser(description='PyTorch ConvNet Training')
+    parser.add_argument('--load_model', action='stroe_true', default=False,
+                        help='load trained model')
+    parser.add_argument('--train', action='stroe_true', default=True,
+                        help='train model')
+    parser.add_argument('--epochs', type=int, default=300,
+                        help='num of epochs')
+    parser.add_argument('--epoch2continue', type=int, default=-1,
+                        help='epoch2continue')
+    parser.add_argument('--experiment_name', type=str, default='default',
+                        help='exp name')
+    parser.add_argument('--machine', type=str, default='local',
+                        help='machine name')
+    parser.add_argument('--inpMode', type=str, default='full',
+                        help='machine name')
+    parser.add_argument('--data_root', type=str, default='',
+                        help='root directory of the data')
+    parser.add_argument('--data_suf', type=str, default='',
+                        help='data suffix')
+    parser.add_argument('--batch_size', type=int, default=50,
+                        help='batch size')
+    parser.add_argument('--model', default='EDOF', const='EDOF', nargs='?', choices=['EDOF', 'Unet'],
+                        help='model architecture (default: %(default)s)')
     args = parser.parse_args()
     return args
 
