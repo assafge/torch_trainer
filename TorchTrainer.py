@@ -1,25 +1,18 @@
 import torch
-from utils import read_yaml, get_class
+from trainer_utils import read_yaml, get_class
 import os
 from shutil import rmtree
-from time import time
+from datetime import datetime
 from glob import glob
 from torch.utils.tensorboard import SummaryWriter
-from collections import namedtuple
-
-class LossSum(namedtuple):
-    loss: float = 0
-    writer: SummaryWriter
-    norm_factor: float
 
 
 class ConfigurationStruct:
-    class Struct:
-        def __init__(self, entries: dict):
-            self.__dict__.update(entries)
-            for key, val in self.__dict__:
-                if 'kargs' in key and val is None:
-                    self.__dict__[key] = {}
+    def __init__(self, entries: dict):
+        self.__dict__.update(entries)
+        for key, val in self.__dict__.items():
+            if 'kargs' in key and val is None:
+                self.__dict__[key] = {}
 
 
 class TorchTrainer:
@@ -40,18 +33,20 @@ class TorchTrainer:
                     'data': dataset_cfg}
         config_dict = {}
         for cfg_section, cfg_path in sections.items():
-            config_dict[cfg_section] = read_yaml(cfg_path)
+            config_dict[cfg_section] =  ConfigurationStruct(read_yaml(cfg_path))
         config = ConfigurationStruct(config_dict)
 
-        model_dir = config.model.type + time().strftime("_%d%b%y_%H:%M")
+        model_dir = config.model.type + datetime.now().strftime("_%d%b%y_%H%M")
         root = os.path.join(out_path, model_dir)
         if os.path.isdir(root):
             print("root directory is already exist - will delete the previous and create new")
             rmtree(root)
         os.makedirs(root)
-        os.makedirs(os.path.join(root,'checkpoints'))
-        cls = TorchTrainer(config, gpu_index, root, logger)
+        os.makedirs(os.path.join(root, 'checkpoints'))
+        cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index, logger=logger)
         cls.init_nn()
+        cls.model.to(cls.device)
+        return cls
 
     @classmethod
     def warm_startup(cls, root, gpu_index, logger = None):
@@ -59,15 +54,16 @@ class TorchTrainer:
         for cfg_section, cfg_dict in config_dict.items():
             config_dict[cfg_section] = ConfigurationStruct(cfg_dict)
         config = ConfigurationStruct(config_dict)
-        cls = TorchTrainer(config, gpu_index, root, logger)
+        cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index, logger=logger)
         cls.init_nn()
-        cls.load_model()
+        cls.load_checkpoint()
+        return cls
 
     def init_nn(self):
         model_cls = get_class(self.cfg.model.type, file_path=self.cfg.model.path)
-        self.model = model_cls(self.model.kargs)
+        self.model = model_cls(**self.cfg.model.kargs)
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
-        self.optimizer = model_cls(self.optimizer.kargs)
+        self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
     def load_checkpoint(self):
         latest = None
@@ -89,54 +85,60 @@ class TorchTrainer:
         self.model.to(self.device)
 
     def save_checkpoint(self):
-        sub_dir = os.path.join(self.root, 'checkpoints')
-        if not os.path.isdir(sub_dir):
-            os.makedirs(sub_dir)
+        fpath = os.path.join(self.root, 'checkpoints', 'checkpoint_{}.pth'.format(self.epoch))
+        print('saving checkpoint {}'.format(fpath))
         torch.save({'epoch': self.epoch,
                     'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict()},
-                   os.path.join(sub_dir, 'checkpoint_{}.pth'.format(self.epoch)))
+                    'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
 
-    def get_data_loaders(self):
-        dataset_cls = get_class(self.data.type, file_path=self.cfg.data.path)
-        dataset = dataset_cls(self.cfg.data.kargs)
-        train_loader, test_loader = dataset.get_data_loaders()
-        return train_loader, test_loader
+    def init_training_obj(self):
+        """create helper objects in order to make the train function more clear"""
+        dataset_cls = get_class(self.cfg.data.type, file_path=self.cfg.data.path)
+        dataset = dataset_cls(**self.cfg.data.kargs)
+        train_loader, test_loader = dataset.get_data_loaders(self.cfg.model.batch_size)
+        train = {'writer': SummaryWriter(os.path.join(self.root, 'train')),
+                 'size': len(train_loader),
+                 'loader': train_loader,
+                 'loss': 0.0}
+        test = {'writer': SummaryWriter(os.path.join(self.root, 'test')),
+                'size': len(test_loader),
+                'loader': test_loader,
+                'loss': 0.0}
+        return ConfigurationStruct(train), ConfigurationStruct(test)
 
     def train(self):
-        criterion_cls = get_class(self.model.loss, module_path='torch.nn')
-        criterion = criterion_cls(**self.cfg.model.loss_kargs.kargs)
+        criterion_cls = get_class(self.cfg.model.loss, module_path='torch.nn')
+        criterion = criterion_cls(**self.cfg.model.loss_kargs)
         self.model.zero_grad()
-        train_loader, test_loader = self.get_data_loaders()
-        train = LossSum(writer=SummaryWriter(os.path.join(self.root, 'train')), norm_facotr=len(train_loader))
-        test = LossSum(writer=SummaryWriter(os.path.join(self.root, 'test')), norm_facotr=len(test_loader))
+        train, test = self.init_training_obj()
 
-        while self.epoch < self.model.epochs:
-            train.loss = test.loss = 0
+        while self.epoch < self.cfg.model.epochs:
+            train.loss = test.loss = 0.0
 
             self.model.train()
-            for i, (x, y) in enumerate(train_loader):
+            for i, (x, y) in enumerate(train.loader):
                 data, labels = x.to(self.device), y.to(self.device)
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = criterion(output, labels)
                 loss.backward()
                 self.optimizer.step()
-                if i % (len(train_loader) // 4) == 0:
-                    print('Step: {} Train loss: {:3.3}'.format(i, loss.item()))
+                if i % (train.size // 4) == 0:
+                    print('step: {} / {} - Train loss: {:3.3}'.format(i, train.size, loss.item()))
                 train.loss += loss.item()
 
             self.model.eval()
-            for i, (x, y) in enumerate(train_loader):
+            for i, (x, y) in enumerate(test.loader):
                 data, labels = x.to(self.device), y.to(self.device)
                 with torch.no_grad():
                     out = self.model(data)
                 loss = criterion(out, labels)
-                if i % (len(train_loader) // 4) == 0:
-                    print('Step: {} / Val. loss: {:3.3}'.format(i, loss.item()))
+                if i % (test.size // 3) == 0:
+                    print('step: {} / {} - Test loss:  {:3.3}'.format(i, test.size, loss.item()))
                 test.loss += loss.item()
 
-            train.writer.add_scalar(tag='Loss', scalar_value=train.loss / train.norm_factor, global_step=self.epoch)
-            train.writer.add_scalar(tag='Loss', scalar_value=train.loss / test.norm_factor, global_step=self.epoch)
+            train.writer.add_scalar(tag='Loss', scalar_value=train.loss / train.size, global_step=self.epoch)
+            test.writer.add_scalar(tag='Loss', scalar_value=test.loss / test.size, global_step=self.epoch)
             self.save_checkpoint()
+            self.epoch += 1
 

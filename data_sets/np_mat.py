@@ -5,8 +5,7 @@ from torch import manual_seed
 
 class NumpyMatDataset(Dataset):
     def __init__(self, file_path, seed: int, train_split: float, data_lbl='data', labels_lbl='labels'):
-        with open(file_path) as f:
-            mat = np.load(f)
+        mat = np.load(file_path)
         self.data = mat[data_lbl]
         self.labels = mat[data_lbl]
         self.seed = seed

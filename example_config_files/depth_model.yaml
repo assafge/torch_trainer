@@ -1,0 +1,12 @@
+path: ../models.py
+type: Net
+batch_size: 16
+epochs: 400
+kargs:
+    target_mode: 
+    skip_layer: true
+    mode: segmentation
+loss: CrossEntropyLoss
+loss_kargs:
+    reduction: mean
+

@@ -1,0 +1,10 @@
+type: EdofNet
+path: /home/assafg/EDOF/models.py
+batch_size: 64
+epochs: 300
+kargs:
+  max_dilation: 7
+
+loss: SmoothL1Loss
+loss_kargs:
+
