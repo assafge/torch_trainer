@@ -1,10 +1,12 @@
 import torch
-from trainer_utils import read_yaml, get_class
+from trainer_utils import read_yaml, get_class, print_progress
 import os
 from shutil import rmtree
 from datetime import datetime
 from glob import glob
 from torch.utils.tensorboard import SummaryWriter
+from performance_measurements import PerformanceMeasurement
+from typing import List
 
 
 class ConfigurationStruct:
@@ -13,6 +15,32 @@ class ConfigurationStruct:
         for key, val in self.__dict__.items():
             if 'kargs' in key and val is None:
                 self.__dict__[key] = {}
+
+
+class UtilityObj:
+    def __init__(self, loader: torch.utils.data.DataLoader, writer_path, measurements: dict = {}):
+        self.loader = loader
+        self.writer = SummaryWriter(writer_path)
+        self.loss = 0.0
+        self.measurements: List[str, PerformanceMeasurement] = []
+
+        if measurements:
+            for meas in measurements.values():
+                cls_ = get_class(meas['type'], meas['path'])
+                self.measurements.append(cls_())
+
+    def measure(self, outputs, labels):
+        for m in self.measurements:
+            m.add_measurement(outputs, labels)
+
+    def write_step(self, step):
+        for m in self.measurements:
+            m.write_step(writer=self.writer, mini_batches=len(self.loader), step=step)
+
+    @property
+    def size(self):
+        return len(self.loader)
+
 
 
 class TorchTrainer:
@@ -86,7 +114,7 @@ class TorchTrainer:
 
     def save_checkpoint(self):
         fpath = os.path.join(self.root, 'checkpoints', 'checkpoint_{}.pth'.format(self.epoch))
-        print('saving checkpoint {}'.format(fpath))
+        # print('saving checkpoint {}'.format(fpath))
         torch.save({'epoch': self.epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
@@ -96,15 +124,10 @@ class TorchTrainer:
         dataset_cls = get_class(self.cfg.data.type, file_path=self.cfg.data.path)
         dataset = dataset_cls(**self.cfg.data.kargs)
         train_loader, test_loader = dataset.get_data_loaders(self.cfg.model.batch_size)
-        train = {'writer': SummaryWriter(os.path.join(self.root, 'train')),
-                 'size': len(train_loader),
-                 'loader': train_loader,
-                 'loss': 0.0}
-        test = {'writer': SummaryWriter(os.path.join(self.root, 'test')),
-                'size': len(test_loader),
-                'loader': test_loader,
-                'loss': 0.0}
-        return ConfigurationStruct(train), ConfigurationStruct(test)
+        train = UtilityObj(loader=train_loader, writer_path=os.path.join(self.root, 'train'))
+        test = UtilityObj(loader=test_loader, writer_path=os.path.join(self.root, 'test'),
+                          measurements=self.cfg.model.perfomance_measurements)
+        return train, test
 
     def train(self):
         criterion_cls = get_class(self.cfg.model.loss, module_path='torch.nn')
@@ -123,22 +146,26 @@ class TorchTrainer:
                 loss = criterion(output, labels)
                 loss.backward()
                 self.optimizer.step()
-                if i % (train.size // 4) == 0:
-                    print('step: {} / {} - Train loss: {:3.3}'.format(i, train.size, loss.item()))
+                print_progress(iteration=i, total=train.size, prefix='Epoch {} train'.format(self.epoch), length=50,
+                               suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
                 train.loss += loss.item()
-
+            print_progress(iteration=i + 1, total=train.size, prefix='Epoch {} train'.format(self.epoch), length=50,
+                           suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
             self.model.eval()
             for i, (x, y) in enumerate(test.loader):
                 data, labels = x.to(self.device), y.to(self.device)
                 with torch.no_grad():
                     out = self.model(data)
                 loss = criterion(out, labels)
-                if i % (test.size // 3) == 0:
-                    print('step: {} / {} - Test loss:  {:3.3}'.format(i, test.size, loss.item()))
                 test.loss += loss.item()
-
+                print_progress(iteration=i, total=test.size, prefix='Epoch {} test '.format(self.epoch), length=50,
+                               suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
+                test.measure(outputs=out, labels=labels)
+            print_progress(iteration=i + 1, total=test.size, prefix='Epoch {} test '.format(self.epoch), length=50,
+                           suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
             train.writer.add_scalar(tag='Loss', scalar_value=train.loss / train.size, global_step=self.epoch)
             test.writer.add_scalar(tag='Loss', scalar_value=test.loss / test.size, global_step=self.epoch)
+            test.write_step(step=self.epoch)
             self.save_checkpoint()
             self.epoch += 1
 

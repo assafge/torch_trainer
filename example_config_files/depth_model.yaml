@@ -10,3 +10,8 @@ loss: CrossEntropyLoss
 loss_kargs:
     reduction: mean
 
+perfomance_measurements:
+    pixelwize_accuracy:
+        path: ./performance_measurements.py
+        type: PixelWiseAccuracy
+

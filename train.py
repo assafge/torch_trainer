@@ -27,5 +27,6 @@ def main():
                                      dataset_cfg=args.dataset_cfg, gpu_index=args.gpu_index)
     trainer.train()
 
+
 if __name__ == '__main__':
     main()
