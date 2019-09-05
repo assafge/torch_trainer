@@ -7,6 +7,7 @@ from glob import glob
 from torch.utils.tensorboard import SummaryWriter
 from performance_measurements import PerformanceMeasurement
 from typing import List
+import yaml
 
 
 class ConfigurationStruct:
@@ -56,12 +57,12 @@ class TorchTrainer:
 
     @classmethod
     def new_train(cls, out_path, model_cfg, optimizer_cfg, dataset_cfg, gpu_index, logger=None):
-        sections = {'model': model_cfg,
-                    'optimizer': optimizer_cfg,
-                    'data': dataset_cfg}
+        sections = {'model': read_yaml(model_cfg),
+                    'optimizer': read_yaml(optimizer_cfg),
+                    'data': read_yaml(dataset_cfg)}
         config_dict = {}
-        for cfg_section, cfg_path in sections.items():
-            config_dict[cfg_section] =  ConfigurationStruct(read_yaml(cfg_path))
+        for cfg_section, cfg in sections.items():
+            config_dict[cfg_section] = ConfigurationStruct(cfg)
         config = ConfigurationStruct(config_dict)
 
         model_dir = config.model.type + datetime.now().strftime("_%d%b%y_%H%M")
@@ -71,6 +72,8 @@ class TorchTrainer:
             rmtree(root)
         os.makedirs(root)
         os.makedirs(os.path.join(root, 'checkpoints'))
+        with open(os.path.join(root, 'cfg.yaml'), 'w') as f:
+            yaml.dump(data=sections, stream=f)
         cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index, logger=logger)
         cls.init_nn()
         cls.model.to(cls.device)
@@ -78,7 +81,7 @@ class TorchTrainer:
 
     @classmethod
     def warm_startup(cls, root, gpu_index, logger = None):
-        config_dict =  read_yaml(os.path.join(root, 'cfg.yaml'))
+        config_dict = read_yaml(os.path.join(root, 'cfg.yaml'))
         for cfg_section, cfg_dict in config_dict.items():
             config_dict[cfg_section] = ConfigurationStruct(cfg_dict)
         config = ConfigurationStruct(config_dict)
@@ -96,20 +99,21 @@ class TorchTrainer:
     def load_checkpoint(self):
         latest = None
         epoch = -1
-        for cp_file in glob(os.path.join(self.root, 'checkpoints', 'checkpoint_*.pth')):
+        for cp_path in glob(os.path.join(self.root, 'checkpoints', 'checkpoint_*.pth')):
+            cp_file = os.path.basename(cp_path)
             cp_epoch = int(cp_file.split('_')[1].split('.')[0])
             if cp_epoch > epoch:
                 epoch = cp_epoch
-                latest = cp_file
+                latest = cp_path
 
         checkpoint = torch.load(latest)
         self.epoch = epoch
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        # for state in self.optimizer.state.values():
-        #     for k, v in state.items():
-        #         if isinstance(v, torch.Tensor):
-        #             state[k] = v.to(self.device)
+        for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(self.device)
         self.model.to(self.device)
 
     def save_checkpoint(self):

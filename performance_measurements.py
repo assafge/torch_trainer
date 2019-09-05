@@ -1,5 +1,6 @@
 import torch
 from torch.utils.tensorboard import SummaryWriter
+import numpy as np
 
 
 class PerformanceMeasurement:
@@ -18,14 +19,14 @@ class PixelWiseAccuracy(PerformanceMeasurement):
         total = labels.nelement()
         predicted = outputs.data
         predicted = predicted.to('cpu')
-        predicted_img = predicted.numpy()
+        predicted_img = (predicted.numpy() + 0.5).astype(np.int)
 
         labels_data = labels.data
         labels_data = labels_data.to('cpu')
-        labels_data = labels_data.numpy()
+        labels_data = labels_data.numpy().astype(np.int)
         if labels_data.shape == predicted_img.shape:
             corr = (predicted_img == labels_data)
-            correct = corr.astype(int).item(1)
+            correct = corr.astype(np.int).item(1)
             self.sum += (correct / total)
 
     def write_step(self, writer: SummaryWriter, mini_batches: int, step: int):

@@ -23,7 +23,10 @@ def get_args():
 
 def main():
     args = get_args()
-    trainer = TorchTrainer.new_train(out_path=args.out_path, model_cfg=args.model_cfg, optimizer_cfg=args.optimizer_cfg,
+    if args.model_path:
+        trainer = TorchTrainer.warm_startup(root=args.model_path, gpu_index=args.gpu_index)
+    else:
+        trainer = TorchTrainer.new_train(out_path=args.out_path, model_cfg=args.model_cfg, optimizer_cfg=args.optimizer_cfg,
                                      dataset_cfg=args.dataset_cfg, gpu_index=args.gpu_index)
     trainer.train()
 
