@@ -153,8 +153,11 @@ class TorchTrainer:
                 print_progress(iteration=i, total=train.size, prefix='Epoch {} train'.format(self.epoch), length=50,
                                suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
                 train.loss += loss.item()
+            avr_loss = train.loss / train.size
             print_progress(iteration=i + 1, total=train.size, prefix='Epoch {} train'.format(self.epoch), length=50,
-                           suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
+                           suffix='loss=%0.3f' % avr_loss if avr_loss > 0.1 else 'loss=%0.3e' % avr_loss)
+            train.writer.add_scalar(tag='Loss', scalar_value=avr_loss, global_step=self.epoch)
+
             self.model.eval()
             for i, (x, y) in enumerate(test.loader):
                 data, labels = x.to(self.device), y.to(self.device)
@@ -165,10 +168,10 @@ class TorchTrainer:
                 print_progress(iteration=i, total=test.size, prefix='Epoch {} test '.format(self.epoch), length=50,
                                suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
                 test.measure(outputs=out, labels=labels)
+            avr_loss = test.loss / test.size
             print_progress(iteration=i + 1, total=test.size, prefix='Epoch {} test '.format(self.epoch), length=50,
-                           suffix='loss=%0.3f' % loss.item() if loss.item() > 0.1 else 'loss=%0.3e' % loss.item())
-            train.writer.add_scalar(tag='Loss', scalar_value=train.loss / train.size, global_step=self.epoch)
-            test.writer.add_scalar(tag='Loss', scalar_value=test.loss / test.size, global_step=self.epoch)
+                           suffix='loss=%0.3f' % avr_loss if avr_loss > 0.1 else 'loss=%0.3e' % avr_loss)
+            test.writer.add_scalar(tag='Loss', scalar_value=avr_loss, global_step=self.epoch)
             test.write_step(step=self.epoch)
             self.save_checkpoint()
             self.epoch += 1
