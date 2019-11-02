@@ -1,7 +1,7 @@
 path: ../models.py
 type: Net
 batch_size: 16
-epochs: 400
+epochs: 800
 kargs:
     target_mode: 
     skip_layer: true
@@ -9,6 +9,7 @@ kargs:
 loss: CrossEntropyLoss
 loss_kargs:
     reduction: mean
+    ignore_index: 0
 
 perfomance_measurements:
     pixelwize_accuracy:

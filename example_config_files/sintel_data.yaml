@@ -10,5 +10,5 @@ kargs:
     sigma: 0.0
     seed: 42
     train_split: 0.8
-    scene_separator: _[0-9]_
+    scene_separator: _[0-9]
 loader_kargs:

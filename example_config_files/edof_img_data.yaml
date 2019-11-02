@@ -4,6 +4,7 @@ path: data_sets/np_mat.py
 kargs:
   file_path: /home/assafg/data/edof_norm.npz
   seed: 42
+  sigma: 0.011764 # 0.3 / 255
   train_split: 0.8
   data_lbl: data
   labels_lbl: labels

@@ -61,3 +61,9 @@ def print_progress(iteration, total, prefix='', suffix='', decimals=1, length=10
     # Print New Line on Complete
     if iteration == total:
         print()
+
+
+def retrieve_name(var):
+    # https://ideone.com/ym3bkD
+    callers_local_vars = inspect.currentframe().f_back.f_locals.items()
+    return [var_name for var_name, var_val in callers_local_vars if var_val is var]

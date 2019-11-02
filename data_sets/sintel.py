@@ -3,9 +3,7 @@ import os.path
 import random
 import torch
 import numpy as np
-from skimage.io import imread
-from skimage.util import random_noise, img_as_float64
-# from PIL.Image
+from PIL import Image
 from collections import defaultdict
 from glob import glob
 from torch.utils.data import Dataset, DataLoader, random_split, Subset
@@ -14,15 +12,21 @@ import torchvision.transforms as tsfm
 
 __author__ = "Assaf Genosar"
 
-def round_down(num, divisor):
-    return num - (num % divisor)
 
-def crop_center(img, target):
-    cropy, cropx = target
-    y,x = img.shape[:2]
-    startx = x//2-(cropx//2)
-    starty = y//2-(cropy//2)
-    return img[starty:starty+cropy,startx:startx+cropx]
+def round_up(width, height, divisor):
+    """return needed padding per side"""
+    left = top = right = bottom = 0
+    mod = width % divisor
+    if mod > 0:
+        left = (divisor - mod) // 2
+        right = -1 * ((-divisor + mod) // 2)
+
+    mod = height % divisor
+    if mod > 0:
+        top = (divisor - mod) // 2
+        bottom = -1 * ((-divisor + mod) // 2)
+    return left, top, right, bottom
+
 
 def collate_fn(data):
     """Creates mini-batch tensors from the list of tuples (image, caption).
@@ -37,9 +41,10 @@ def collate_fn(data):
     images, depths = zip(*data)
     # Merge tensors (from tuple of 3D tensor to 4D tensor).
     images = torch.stack(images, 0).float()
-    # images = torch.nn.functional.pad(images)
     depths = torch.stack(depths, 0).long()
+    depths = torch.squeeze(depths, dim=1)
     return images, depths
+
 
 def depth_read(filename):
     """ Read depth data from file, return as numpy array.
@@ -104,30 +109,32 @@ class SintelDataset(Dataset):
         self.mu = mu
         self.sigma = sigma
         random.seed(seed)
+        self.cfg = {'img_dir' : img_dir, 'depth_dir': depth_dir,
+                    'img_suffix': img_suffix, 'depth_suffix': depth_suffix,
+                    'shuffle': shuffle, 'scene_separator': scene_separator}
 
-
+    def index_data(self):
         # prepare the data according to split method
-        if 'scene' in split_method or 'even' in split_method:
-            assert scene_separator is not None, "Error - scene separator argument is missing"
-            self.map_data(img_dir, depth_dir, img_suffix, depth_suffix, scene_separator)
+        if 'scene' in self.split_method or 'even' in self.split_method:
+            self.crawl_data()
             assert len(self.data) > 0, "ERROR - dataset is empty - check dataset parameters"
-
-        if 'scene' in split_method:
-            test_scene = split_method.replace('scene_', '')
+        if 'scene' in self.split_method:
+            test_scene = self.split_method.replace('scene_', '')
             self.test_idx = np.array(self.data_map[test_scene], dtype=np.int)
             self.train_idx = np.zeros(len(self.data) - self.test_idx.size, dtype=np.int)
             train_ptr = 0
             for scene, ids in self.data_map.items():
                 if scene != test_scene:
                     self.train_idx[train_ptr:train_ptr + len(ids)] = ids
-        elif 'even' in split_method:
+        elif 'even' in self.split_method:
+            train_split = self.cfg['train_split']
             assert train_split is not None, "Error - train_split argument is missing"
-            self.train_idx = np.zeros(int(len(self.data) * train_split), dtype=np.int)
+            self.train_idx = np.zeros(int(len(self.data) * self.cfg['train_split']), dtype=np.int)
             self.test_idx = np.zeros(len(self.data) - self.train_idx.size, dtype=np.int)
             train_ptr = 0
             test_ptr = 0
             for scene, ids in self.data_map.items():
-                if shuffle:
+                if self.cfg['shuffle']:
                     random.shuffle(ids)
                 train_portion = min(int(len(ids)*train_split + 0.5), self.train_idx.size - train_ptr)
                 test_portion = len(ids) - train_portion
@@ -135,42 +142,44 @@ class SintelDataset(Dataset):
                 self.test_idx[test_ptr:test_ptr + test_portion] = ids[train_portion:]
                 train_ptr += train_portion
                 test_ptr += test_portion
-        elif 'random' in split_method:
-            assert train_split is not None, "Error - train_split argument is missing"
+        elif 'random' in self.split_method:
+            img_dir, img_suffix = self.cfg['img_dir'], self.cfg['img_suffix']
+            depth_dir, depth_suffix = self.cfg['depth_dir'], self.cfg['depth_suffix']
             for img_path in glob(os.path.join(img_dir, '*' + img_suffix)):
                 depth_file = os.path.basename(img_path).replace(img_suffix, depth_suffix)
                 depth_path = os.path.join(depth_dir, depth_file)
                 if os.path.exists(depth_path):
                     self.data.append((img_path, depth_path))
 
-        # here i'm assuming that all the data is homogeneous
-        first_im = imread(self.data[0][0])
-        width, height = first_im.shape[:2]
-        self.target_size = (round_down(width, 32), round_down(height, 32))
-        # self.im_transform = tsfm.Compose([tsfm.CenterCrop(target_size), tsfm.ToTensor()])
+        # here i'm assuming that the data is homogeneous
+        first_im = Image.open(self.data[0][0])
+        self.shape = first_im.size
+        self.transform = tsfm.Compose([tsfm.Pad(round_up(*self.shape, 32)), tsfm.ToTensor(),
+                                      tsfm.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                      # tsfm.Lambda(lambda x: x + torch.randn_like(x))
+                                       ])
+        self.gt_transform = tsfm.Compose([tsfm.ToPILImage(), tsfm.Pad(round_up(*self.shape, 32)),
+                                         tsfm.ToTensor()])
 
     def __getitem__(self, item):
         img_path, dpt_path = self.data[item]
-        img = imread(img_path)
-        img = crop_center(img, self.target_size)
-        img = img.transpose(2, 0, 1)
-        if self.sigma > 0:
-            img = random_noise(img, mode='gaussian', seed=self.seed, var=self.sigma**2)
-        else:
-            # random noise will convert the image to float
-            img = img_as_float64(img)
-        img = torch.as_tensor(img, dtype=torch.float64)
+        img = Image.open(img_path)
+        assert img.size == self.shape, "invalid img size - {} , ({}, {})".format(img_path, img.width, img.height)
+        img = self.transform(img)
+
         dpt = depth_read(dpt_path)
-        dpt = crop_center(dpt, self.target_size)
-        return torch.as_tensor(img, dtype=torch.float64), torch.as_tensor(dpt, dtype=torch.long)
+        dpt = self.gt_transform(dpt)
+        return img, dpt
 
     def __len__(self):
         return len(self.data)
 
-    def map_data(self, img_dir, depth_dir, img_suffix, depth_suffix, scene_separator):
+    def crawl_data(self):
+        img_dir, img_suffix = self.cfg['img_dir'], self.cfg['img_suffix']
+        depth_dir, depth_suffix = self.cfg['depth_dir'], self.cfg['depth_suffix']
         for img_path in glob(os.path.join(img_dir, '*' + img_suffix)):
             img_name = os.path.basename(img_path)
-            scene = re.split(scene_separator, img_name)[0] + re.search(scene_separator, img_name).group(0)
+            scene = re.split(self.scene_separator, img_name)[0] + re.search(self.scene_separator, img_name).group(0)
             depth_file = os.path.basename(img_path).replace(img_suffix, depth_suffix)
             depth_path = os.path.join(depth_dir, depth_file)
             if os.path.exists(depth_path):
@@ -188,9 +197,9 @@ class SintelDataset(Dataset):
             return train_data_loader, test_data_loader
         else:
             train_loader = DataLoader(dataset=Subset(self, indices=self.train_idx), batch_size=batch_size,
-                                      collate_fn=collate_fn)
+                                      collate_fn=collate_fn, num_workers=4)
             test_loader = DataLoader(dataset=Subset(self, indices=self.test_idx), batch_size=batch_size,
-                                     collate_fn=collate_fn)
+                                     collate_fn=collate_fn, num_workers=4)
             return train_loader, test_loader
 
 
