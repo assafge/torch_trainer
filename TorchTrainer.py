@@ -21,13 +21,19 @@ class ConfigurationStruct:
 
 
 class UtilityObj:
-    def __init__(self, loader: torch.utils.data.DataLoader, writer_path, measurements: dict = {}):
-        self.loader = loader
+    def __init__(self, loaders, writer_path, measurements: dict = {}):
+        if type(loaders) is list:
+            self.loaders = loaders
+        elif type(loaders) is torch.utils.data.DataLoader:
+            self.loaders = [loaders]
+        else:
+            print('error - data loader is invalid')
         self.writer = SummaryWriter(writer_path)
         self.loss = 0.0
+        self.index = 0
         self.name = os.path.basename(writer_path)
         self.pname = self.name + (' ' * (7 - len(self.name)))
-        self.measurements: List[str, PerformanceMeasurement] = []
+        self.measurements: List[PerformanceMeasurement] = []
         self.stime = time()
 
         if measurements:
@@ -41,28 +47,30 @@ class UtilityObj:
 
     def write_step(self, step):
         for m in self.measurements:
-            m.write_step(writer=self.writer, mini_batches=len(self.loader), step=step)
+            m.write_step(writer=self.writer, mini_batches=self.size, step=step)
 
     def init_loop(self):
         self.loss = 0
+        self.index = 0
         self.stime = time()
 
     @property
     def size(self):
-        return len(self.loader)
+        return sum([len(loader) for loader in self.loaders])
 
-    def print_loss(self, val, idx, epoch):
-        if idx == self.size:
+    def print_loss(self, val, epoch):
+        if self.index == self.size:
             avr = self.loss / self.size
-            print_progress(iteration=idx, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
+            print_progress(iteration=self.index, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
                            suffix='average loss=%.3f, loop time=%.2f' % (avr, time() - self.stime) if avr > 0.1
                            else 'average loss=%.3e, loop time=%.2f' % (avr, time() - self.stime))
         else:
-            print_progress(iteration=idx, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
+            print_progress(iteration=self.index, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
                            suffix=' running loss=%0.3f' % val if val > 0.1 else ' running loss=%0.3e' % val)
+        self.index += 1
 
-    def add_debug_image(self, labels, outputs, step):
-        im = (outputs[0].argmax(axis=0).cpu().numpy() * (255 / 15)).astype(np.uint8)
+    def add_debug_image(self, outputs, labels, step):
+        im = (outputs[0].argmax(dim=0).cpu().numpy() * (255 / 15)).astype(np.uint8)
         ref = (labels[0].cpu().numpy() * (255 / 15)).astype(np.uint8)
         self.writer.add_image('result', im, global_step=step, dataformats='HW')
         self.writer.add_image('ref', ref, global_step=step, dataformats='HW')
@@ -84,6 +92,7 @@ class TorchTrainer:
         self.epoch: int = 0
         self.root = root
         self.dataset = None
+        self.running = True
 
     @classmethod
     def new_train(cls, out_path, model_cfg, optimizer_cfg, dataset_cfg, gpu_index, exp_name, logger=None):
@@ -129,7 +138,7 @@ class TorchTrainer:
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
         dataset_cls = get_class(self.cfg.data.type, file_path=self.cfg.data.path)
-        self.dataset = dataset_cls(**self.cfg.data.kargs)
+        self.dataset = dataset_cls(self.device, **self.cfg.data.kargs)
 
     def load_checkpoint(self):
         latest = None
@@ -160,9 +169,9 @@ class TorchTrainer:
 
     def init_training_obj(self):
         """create helper objects in order to make the train function more clear"""
-        train_loader, test_loader = self.dataset.get_data_loaders(self.cfg.model.batch_size)
-        train = UtilityObj(loader=train_loader, writer_path=os.path.join(self.root, 'train'))
-        test = UtilityObj(loader=test_loader, writer_path=os.path.join(self.root, 'test'),
+        train_loaders, test_loaders = self.dataset.get_data_loaders(self.cfg.model.batch_size)
+        train = UtilityObj(loaders=train_loaders, writer_path=os.path.join(self.root, 'train'))
+        test = UtilityObj(loaders=test_loaders, writer_path=os.path.join(self.root, 'test'),
                           measurements=self.cfg.model.perfomance_measurements)
         return train, test
 
@@ -171,46 +180,55 @@ class TorchTrainer:
         criterion = criterion_cls(**self.cfg.model.loss_kargs)
         self.model.zero_grad()
         train, test = self.init_training_obj()
-        best_loss = test.loss = 2 ** 16
+        best_loss = 2 ** 16
+        self.running = True
 
-        while self.epoch < self.cfg.model.epochs:
-            if test.loss > best_loss:
-                best_loss = test.loss
+        while self.epoch <= self.cfg.model.epochs and self.running:
             self.model.train()
             train.init_loop()
-            for i, (x, y) in enumerate(train.loader):
-                data, labels = x.to(self.device), y.to(self.device)
-                self.optimizer.zero_grad()
-                output = self.model(data)
-                loss = criterion(output, labels)
-                loss.backward()
-                self.optimizer.step()
-                train.loss += loss.item()
-                train.print_loss(loss.item(), i, self.epoch)
-            train.print_loss(train.loss, i + 1, self.epoch)
+            for train_loader in train.loaders:
+                if not self.running:
+                    break
+                for x, y in train_loader:
+                    if not self.running:
+                        break
+                    data, labels = x.to(self.device), y.to(self.device)
+                    output = self.model(data)
+                    self.optimizer.zero_grad()
+                    loss = criterion(output, labels)
+                    loss.backward()
+                    self.optimizer.step()
+                    train.loss += loss.item()
+                    train.print_loss(loss.item(), self.epoch)
+
+            train.print_loss(train.loss, self.epoch)
             train.writer.add_scalar(tag='Loss', scalar_value=train.loss / train.size, global_step=self.epoch)
 
-            if self.epoch % 5 == 0:
+            if self.epoch % 5 == 0 and self.running:
                 self.model.eval()
+                labels = out = None
                 test.init_loop()
-                for i, (x, y) in enumerate(test.loader):
-                    data, labels = x.to(self.device), y.to(self.device)
-                    with torch.no_grad():
-                        out = self.model(data)
-                    loss = criterion(out, labels)
-                    test.loss += loss.item()
-                    test.print_loss(loss.item(), i, self.epoch)
-                    test.measure(outputs=out, labels=labels, step=self.epoch)
-                test.print_loss(test.loss, i + 1, self.epoch)
+                for test_loader in test.loaders:
+                    for x, y in test_loader:
+                        data, labels = x.to(self.device), y.to(self.device)
+                        with torch.no_grad():
+                            out = self.model(data)
+                            loss = criterion(out, labels)
+                            test.loss += loss.item()
+                            test.measure(outputs=out, labels=labels, step=self.epoch)
+                            test.print_loss(loss.item(), self.epoch)
+
+                test.print_loss(test.loss, self.epoch)
                 test.writer.add_scalar(tag='Loss', scalar_value=test.loss / test.size, global_step=self.epoch)
+                test.add_debug_image(out, labels, step=self.epoch)
                 test.write_step(step=self.epoch)
-
-            # self.save_checkpoint(test.loss < best_loss)
-            self.save_checkpoint(True)
+                if test.loss < best_loss:
+                    best_loss = test.loss
+                # self.save_checkpoint(test.loss < best_loss)
+                self.save_checkpoint(True)
             self.epoch += 1
-
-    def inference(self, img):
-        img_t = torch.Tensor(img).to(device=self.device)
-        output = self.model(img_t)
-        return output.to('cpu').numpy()
+        if not self.running:
+            self.save_checkpoint(True)
+        else:
+            self.running = False
 

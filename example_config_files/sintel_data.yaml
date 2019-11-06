@@ -1,14 +1,25 @@
 path: ./data_sets/sintel.py
 type: SintelDataset
 kargs:
-    img_dir: /media/yotamg/bd0eccc9-4cd5-414c-b764-c5a7890f9785/Yotam/Sintel/cont_filtered_dn_1100/rgb/
-    depth_dir: /media/yotamg/bd0eccc9-4cd5-414c-b764-c5a7890f9785/Yotam/Sintel/cont_filtered_dn_1100/GT/
-    img_suffix: _1100_maskImg.png
-    depth_suffix: _GT.dpt
-    split_method: even
+
     shuffle: True
-    sigma: 0.0
+    sigma: 3 # 8bit scale
     seed: 42
-    train_split: 0.8
-    scene_separator: _[0-9]
+    train_split: 0.9
+    data_sets:
+        sintel:
+            img_dir: /media/yotamg/bd0eccc9-4cd5-414c-b764-c5a7890f9785/Yotam/Sintel/cont_filtered_dn_1100/rgb/
+            depth_dir: /media/yotamg/bd0eccc9-4cd5-414c-b764-c5a7890f9785/Yotam/Sintel/cont_filtered_dn_1100/GT/
+            img_suffix: _1100_maskImg.png
+            depth_suffix: _GT.dpt
+            scene_separator: _[0-9]
+            split_method: even
+        tau_agent:
+            img_dir: /media/yotamg/bd0eccc9-4cd5-414c-b764-c5a7890f9785/Yotam/Stereo/Tau_left_images/left_images_filtered/
+            depth_dir: /media/yotamg/bd0eccc9-4cd5-414c-b764-c5a7890f9785/Yotam/Stereo/Tau_left_images/left_images_filtered_disc_GT/
+            img_suffix: _1100_maskImg.png
+            depth_suffix: _GT.dpt
+            scene_separator: _
+            split_method: even
+
 loader_kargs:

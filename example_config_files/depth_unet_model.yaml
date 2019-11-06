@@ -1,11 +1,11 @@
-path: ../models.py
-type: Net
-batch_size: 16
+path: ./models/Unet-milesial.py
+type: UNet
+batch_size: 3
 epochs: 400
 kargs:
-    target_mode: 
-    skip_layer: true
-    mode: segmentation
+    n_channels: 3
+    n_classes: 16
+    bilinear: True
 loss: CrossEntropyLoss
 loss_kargs:
     ignore_index: 0

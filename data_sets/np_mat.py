@@ -21,16 +21,7 @@ class NumpyMatDataset(Dataset):
         img = self.data[item]
         lbl = self.labels[item]
 
-        # augmentations: #
-        # torch transformations cannot be applied to a pair of images, so I've decided to implement in numpy.
-        gauss = np.random.normal(0, self.sigma, img.shape).astype(np.float32)
-        noisy = img + gauss
-        noisy = np.clip(noisy, 0, 1)
-        for augment in [np.flipud, np.fliplr]:
-            coin = np.random.rand()
-            if coin > 0.5:
-                noisy = np.ascontiguousarray(augment(noisy))
-                lbl = np.ascontiguousarray(augment(lbl))
+
         noisyt = as_tensor(noisy)
         lblt = as_tensor(lbl)
         return noisyt, lblt

@@ -2,8 +2,7 @@ import argparse
 
 from TorchTrainer import TorchTrainer
 from time import time
-from PIL import Image
-import torchvision
+from threading import Thread
 
 
 def get_args():
@@ -20,6 +19,7 @@ def get_args():
     pre_train = parser.add_argument_group('pre-trained')
     pre_train.add_argument('-r', '--model_path', help='path to pre-trained model')
     pre_train.add_argument('-i', '--inference_img', default=None)
+    pre_train.add_argument('-gt', '--GT', default=None)
 
     args = parser.parse_args()
     return args
@@ -34,13 +34,22 @@ def main():
         trainer = TorchTrainer.new_train(out_path=args.out_path, model_cfg=args.model_cfg, optimizer_cfg=args.optimizer_cfg,
                                          dataset_cfg=args.dataset_cfg, gpu_index=args.gpu_index, exp_name=args.exp_name)
     if not args.inference_img:
-        trainer.train()
+        print('training is about to start, in order to stop => type "stop" + ↵')
+        process = Thread(target=trainer.train)
+        process.start()
+        while process.is_alive() and trainer.running:
+            if 'stop' in input():
+                trainer.running = False
+                print('stopping...')
+        process.join()
+        print()
+
     else:
         import cv2
         import matplotlib.pyplot as plt
         import numpy as np
         import torch
-
+        segmentation = True
         trainer.model.eval()
         with torch.no_grad():
             if 'tif' in args.inference_img:
@@ -55,19 +64,34 @@ def main():
             # pil_im = Image.fromarray(im)
             # color = color.transpose(1, 2, 0)
             # inputs = trainer.dataset.transform(color/255).float().to(trainer.device)
-            inputs = torch.from_numpy(np.transpose(color/255, (2, 0, 1))).float()
+            inputs = torch.from_numpy(np.transpose(color/255, (2, 0, 1))).float().to(trainer.device)
             inputs = inputs.unsqueeze(0)
 
             out = trainer.model(inputs)
-            # outs = out.argmax(dim=1)
-            out = out.cpu().numpy()
-            out = np.squeeze(out, axis=0)
-            out = out.transpose(1, 2, 0)
-            out = (out * 255).astype(np.uint8)
-        fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=True, sharey=True)
-        ax1.imshow(color), ax1.set_title('in')
-        ax2.imshow(out), ax2.set_title('out')
+            if segmentation:
+                print(out.shape)
+                outs = out.argmax(dim=1).squeeze()
+                print(out.shape)
+                out_im = outs.cpu().numpy()
+            if not segmentation:
+                out_np = out.cpu().numpy()
+                out_im = np.squeeze(out_np, axis=0)
+                out_im = out_im.transpose(1, 2, 0)
+                out_im = np.clip(out_im, 0, 1)
+                out_im = (out_im * 255).astype(np.uint8)
+
         print('calc time = %.2f' % (time() - t0))
+
+        if args.GT:
+            gt = cv2.imread(args.GT)
+            rows = 3
+        else:
+            rows = 2
+        fig, axes = plt.subplots(nrows=rows, ncols=1, sharex=True, sharey=True)
+        axes[0].imshow(color), axes[0].set_title('in')
+        axes[1].imshow(out_im), axes[1].set_title('out')
+        if args.GT:
+            axes[2].imshow(color), axes[2].set_title('GT')
         plt.show()
 
 
