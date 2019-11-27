@@ -1,5 +1,5 @@
 import torch
-from trainer_utils import read_yaml, get_class, print_progress, retrieve_name
+from trainer_utils import read_yaml, get_class, print_progress, plot_confusion_matrix
 import os
 from shutil import rmtree
 from datetime import datetime
@@ -9,8 +9,6 @@ from performance_measurements import PerformanceMeasurement
 from typing import List
 import yaml
 import numpy as np
-import matplotlib.pyplot as plt
-
 
 class ConfigurationStruct:
     def __init__(self, entries: dict):
@@ -60,20 +58,27 @@ class UtilityObj:
 
     def print_loss(self, val, epoch):
         if self.index == self.size:
+            loop_time = time() - self.stime
             avr = self.loss / self.size
             print_progress(iteration=self.index, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
-                           suffix='average loss=%.3f, loop time=%.2f' % (avr, time() - self.stime) if avr > 0.1
-                           else 'average loss=%.3e, loop time=%.2f' % (avr, time() - self.stime))
+                           suffix='average loss=%.3f, loop time=%.2f' % (avr, loop_time) if avr > 0.1
+                           else 'average loss=%.3e, loop time=%.2f' % (avr, loop_time))
         else:
             print_progress(iteration=self.index, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
                            suffix=' running loss=%0.3f' % val if val > 0.1 else ' running loss=%0.3e' % val)
         self.index += 1
 
-    def add_debug_image(self, outputs, labels, step):
+    def add_debug_image(self, outputs, labels, step, suffix=''):
         im = (outputs[0].argmax(dim=0).cpu().numpy() * (255 / 15)).astype(np.uint8)
         ref = (labels[0].cpu().numpy() * (255 / 15)).astype(np.uint8)
-        self.writer.add_image('result', im, global_step=step, dataformats='HW')
-        self.writer.add_image('ref', ref, global_step=step, dataformats='HW')
+        self.writer.add_image('result'+suffix, im, global_step=step, dataformats='HW')
+        self.writer.add_image('ref'+suffix, ref, global_step=step, dataformats='HW')
+
+    def add_confusion_matrix(self, outputs, labels, step, suffix=''):
+        pred = outputs.argmax(dim=1).cpu().numpy().astype(np.uint8).ravel()
+        ref = labels.cpu().numpy().astype(np.uint8).ravel()
+        im = plot_confusion_matrix(ref, pred, [str(i) for i in range(16)])
+        self.writer.add_image('confusion_mat'+suffix, im, global_step=step, dataformats='HWC')
 
 
 class TorchTrainer:
@@ -135,15 +140,18 @@ class TorchTrainer:
     def init_nn(self):
         model_cls = get_class(self.cfg.model.type, file_path=self.cfg.model.path)
         self.model = model_cls(**self.cfg.model.kargs)
-        optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
-        self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
+        self.model.to(self.device)
         dataset_cls = get_class(self.cfg.data.type, file_path=self.cfg.data.path)
         self.dataset = dataset_cls(self.device, **self.cfg.data.kargs)
+        optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
+        self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
     def load_checkpoint(self):
         latest = None
         epoch = -1
-        cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
+        cp_path = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth')
+        if not os.path.exists(cp_path):
+            cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
         checkpoint = torch.load(cp_path)
         self.epoch = checkpoint['epoch']
         self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -157,9 +165,11 @@ class TorchTrainer:
     def save_checkpoint(self, better):
         if better:
             fpath = os.path.join(self.root, 'checkpoints', 'checkpoint.pth'.format(self.epoch))
-            torch.save({'epoch': self.epoch,
-                        'model_state_dict': self.model.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
+        else:
+            fpath = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth'.format(self.epoch))
+        torch.save({'epoch': self.epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
         # if self.epoch % 50 == 0:
         #     fpath = os.path.join(self.root, 'checkpoints', 'checkpoint_{}.pth'.format(self.epoch))
         #     # print('saving checkpoint {}'.format(fpath))
@@ -176,8 +186,14 @@ class TorchTrainer:
         return train, test
 
     def train(self):
+        if 'weights' in vars(self.dataset):
+            self.cfg.model.loss_kargs.update({
+                'weight': torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)})
         criterion_cls = get_class(self.cfg.model.loss, module_path='torch.nn')
         criterion = criterion_cls(**self.cfg.model.loss_kargs)
+        # w = torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)
+        # criterion = myCrossEntropy.WeightedPerPixelCrossEntropyLoss
+
         self.model.zero_grad()
         train, test = self.init_training_obj()
         best_loss = 2 ** 16
@@ -200,35 +216,44 @@ class TorchTrainer:
                     self.optimizer.step()
                     train.loss += loss.item()
                     train.print_loss(loss.item(), self.epoch)
+                    if train.index == train.size - 1:
+                        test.add_debug_image(output, labels, step=self.epoch, suffix='_train')
 
             train.print_loss(train.loss, self.epoch)
             train.writer.add_scalar(tag='Loss', scalar_value=train.loss / train.size, global_step=self.epoch)
 
-            if self.epoch % 5 == 0 and self.running:
+            if self.epoch % 3 == 0 and self.running:
                 self.model.eval()
-                labels = out = None
                 test.init_loop()
                 for test_loader in test.loaders:
                     for x, y in test_loader:
                         data, labels = x.to(self.device), y.to(self.device)
                         with torch.no_grad():
-                            out = self.model(data)
-                            loss = criterion(out, labels)
+                            output = self.model(data)
+                            loss = criterion(output, labels)
                             test.loss += loss.item()
-                            test.measure(outputs=out, labels=labels, step=self.epoch)
+                            test.measure(outputs=output, labels=labels, step=self.epoch)
                             test.print_loss(loss.item(), self.epoch)
-
+                            if test.index == test.size - 1:
+                                test.add_debug_image(output, labels, step=self.epoch, suffix='_test')
+                                test.add_confusion_matrix(output, labels, step=self.epoch)
                 test.print_loss(test.loss, self.epoch)
                 test.writer.add_scalar(tag='Loss', scalar_value=test.loss / test.size, global_step=self.epoch)
-                test.add_debug_image(out, labels, step=self.epoch)
                 test.write_step(step=self.epoch)
                 if test.loss < best_loss:
                     best_loss = test.loss
+                    self.save_checkpoint(True)
+                else:
+                    self.save_checkpoint(False)
                 # self.save_checkpoint(test.loss < best_loss)
-                self.save_checkpoint(True)
+
             self.epoch += 1
-        if not self.running:
-            self.save_checkpoint(True)
-        else:
-            self.running = False
+        #
+        # if not self.running:
+        #     self.epoch -= 1
+        #     self.save_checkpoint(False)
+        # else:
+
+
+        self.running = False
 

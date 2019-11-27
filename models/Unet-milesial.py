@@ -79,22 +79,22 @@ class OutConv(nn.Module):
 """ Full assembly of the parts to form the complete network """
 
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=True):
+    def __init__(self, n_channels, n_classes, filters=64, bilinear=True):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
 
-        self.inc = DoubleConv(n_channels, 64)
-        self.down1 = Down(64, 128)
-        self.down2 = Down(128, 256)
-        self.down3 = Down(256, 512)
-        self.down4 = Down(512, 512)
-        self.up1 = Up(1024, 256, bilinear)
-        self.up2 = Up(512, 128, bilinear)
-        self.up3 = Up(256, 64, bilinear)
-        self.up4 = Up(128, 64, bilinear)
-        self.outc = OutConv(64, n_classes)
+        self.inc = DoubleConv(n_channels, filters)
+        self.down1 = Down(filters, filters * 2)
+        self.down2 = Down(filters * 2, filters * 4)
+        self.down3 = Down(filters * 4, filters * 8)
+        self.down4 = Down(filters * 8, filters * 8)
+        self.up1 = Up(filters * 16, filters * 4, bilinear)
+        self.up2 = Up(filters * 8, filters * 2, bilinear)
+        self.up3 = Up(filters * 4, filters, bilinear)
+        self.up4 = Up(filters * 2, filters, bilinear)
+        self.outc = OutConv(filters, n_classes)
 
     def forward(self, x):
         x1 = self.inc(x)

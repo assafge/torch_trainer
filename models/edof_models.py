@@ -45,7 +45,7 @@ class Net(nn.Module):
         self.conv1 = nn.Conv2d(3, 16, 5, padding=2)
         self.batch_norm1 = nn.BatchNorm2d(16, momentum=0.99)
         self.pool1 = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(16, 36, 5,padding=2)
+        self.conv2 = nn.Conv2d(16, 36, 5, padding=2)
         self.batch_norm2 = nn.BatchNorm2d(36, momentum=0.99)
         self.pool2 = nn.MaxPool2d(2, 2)
         self.conv3 = nn.Conv2d(36, 64, 5, padding=2)
@@ -54,24 +54,24 @@ class Net(nn.Module):
         self.conv4 = nn.Conv2d(64, 128, 3, padding=1)
         self.batch_norm4 = nn.BatchNorm2d(128, momentum=0.99)
         self.pool4 = nn.MaxPool2d(2, 2)
-        self.conv5 = nn.Conv2d(128,256,3, padding=1)
+        self.conv5 = nn.Conv2d(128, 256, 3, padding=1)
         self.batch_norm5 = nn.BatchNorm2d(256, momentum=0.99)
-        self.pool5 = nn.MaxPool2d(2,2)
+        self.pool5 = nn.MaxPool2d(2, 2)
         self.conv6 = nn.Conv2d(256, num_class, 1)
         self.dense = nn.Linear(512, 256)
         self.dense2 = nn.Linear(256, num_class)
         self.upsampling = nn.ConvTranspose2d(in_channels=num_class, out_channels=num_class,kernel_size=64, stride=32)
         self.conv7_from_pool4 = nn.Conv2d(128, num_class, kernel_size=1)
-        self.upsampling16 = nn.ConvTranspose2d(in_channels=num_class, out_channels=num_class, kernel_size=32, stride=16)
+        self.upsampling16 = nn.ConvTranspose2d(in_channels=num_class, out_channels=num_class, kernel_size=32,stride=16)
         self.conv9_from_pool3 = nn.Conv2d(64, num_class, kernel_size=1)
         self.upsampling8 = nn.ConvTranspose2d(in_channels=num_class, out_channels=num_class, kernel_size=16, stride=8)
-        self.conv8_reg = nn.Conv2d(16, 1, 1, 1, bias=False)     # TODO - Remove! changed name only for checkpoint to match
-        self.conv9_reg = nn.Conv2d(num_class, 1, 1, 1, bias=False)
-        self.conv9_reg.weight.data[0,:,0,0] = torch.arange(num_class).float()
+        self.conv8_reg = nn.Conv2d(16, 1, 1, 1, bias=False)  ##TODO - Remove! changed name only for checkpoint to match
+        self.conv9_reg = nn.Conv2d(num_class,1, 1, 1, bias=False)
+        self.conv9_reg.weight.data[0, :, 0, 0] = torch.arange(num_class).float()
         for param in self.conv9_reg.parameters():
             param.requires_grad = False
         # self.conv8_reg.weight.requires_grad = False
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax()
         # self.conv8_reg.weight[0,:,0,0] = torch.arange(16).float()
         self.num_class = num_class
         self.mode = mode

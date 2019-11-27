@@ -3,7 +3,7 @@ type: SintelDataset
 kargs:
 
     shuffle: True
-    sigma: 3 # 8bit scale
+    sigma: 2   # 8bit scale
     seed: 42
     train_split: 0.9
     data_sets:

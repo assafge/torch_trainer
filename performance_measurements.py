@@ -25,3 +25,12 @@ class PixelWiseAccuracy(PerformanceMeasurement):
         writer.add_scalar(tag=self.__class__.__name__, scalar_value=self.sum / mini_batches, global_step=step)
         self.sum = 0.0
 
+
+class QuaziPixelWiseAccuracy(PixelWiseAccuracy):
+    def __init__(self):
+        self.sum = 0.0
+
+    def add_measurement(self, outputs: torch.Tensor, labels: torch.Tensor, step):
+        self.sum += (int(torch.sum(outputs.argmax(dim=1) == labels.data).to('cpu')) / labels.data.nelement()) * 100
+        self.sum += (int(torch.sum((outputs.argmax(dim=1) - 1) == labels.data).to('cpu')) / labels.data.nelement()) * 100
+        self.sum += (int(torch.sum((outputs.argmax(dim=1) + 1) == labels.data).to('cpu')) / labels.data.nelement()) * 100

@@ -1,5 +1,5 @@
 type: EdofNet
-path: /home/assafg/EDOF/models.py
+path: /home/assafg/EDOF/edof_models.py
 batch_size: 64
 epochs: 300
 kargs:

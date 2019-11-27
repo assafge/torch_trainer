@@ -1,4 +1,4 @@
 type: Adam
 
 kargs:
-  lr: 1e-6
+  lr: 1e-3

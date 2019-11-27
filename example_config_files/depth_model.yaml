@@ -1,7 +1,7 @@
-path: ../models.py
+path: ./models/edof_models.py
 type: Net
 batch_size: 16
-epochs: 400
+epochs: 300
 kargs:
     target_mode: 
     skip_layer: true

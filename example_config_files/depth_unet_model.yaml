@@ -1,10 +1,11 @@
 path: ./models/Unet-milesial.py
 type: UNet
-batch_size: 3
-epochs: 400
+batch_size: 2
+epochs: 300
 kargs:
     n_channels: 3
     n_classes: 16
+    filters: 64
     bilinear: True
 loss: CrossEntropyLoss
 loss_kargs:
@@ -15,4 +16,8 @@ perfomance_measurements:
     pixelwize_accuracy:
         path: ./performance_measurements.py
         type: PixelWiseAccuracy
+
+    quazipixelwize_accuracy:
+        path: ./performance_measurements.py
+        type: QuaziPixelWiseAccuracy
 

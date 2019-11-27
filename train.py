@@ -33,16 +33,18 @@ def main():
     else:
         trainer = TorchTrainer.new_train(out_path=args.out_path, model_cfg=args.model_cfg, optimizer_cfg=args.optimizer_cfg,
                                          dataset_cfg=args.dataset_cfg, gpu_index=args.gpu_index, exp_name=args.exp_name)
+    # if not args.inference_img:
+    #     print('training is about to start, in order to stop => type "stop" + ↵')
+    #     process = Thread(target=trainer.train)
+    #     process.start()
+    #     while process.is_alive() and trainer.running:
+    #         if 'stop' in input():
+    #             trainer.running = False
+    #             print('stopping...')
+    #     process.join()
+    #     print()
     if not args.inference_img:
-        print('training is about to start, in order to stop => type "stop" + ↵')
-        process = Thread(target=trainer.train)
-        process.start()
-        while process.is_alive() and trainer.running:
-            if 'stop' in input():
-                trainer.running = False
-                print('stopping...')
-        process.join()
-        print()
+        trainer.train()
 
     else:
         import cv2
@@ -83,7 +85,7 @@ def main():
         print('calc time = %.2f' % (time() - t0))
 
         if args.GT:
-            gt = cv2.imread(args.GT)
+            gt = trainer.dataset.depth_read(args.GT)
             rows = 3
         else:
             rows = 2
@@ -91,7 +93,7 @@ def main():
         axes[0].imshow(color), axes[0].set_title('in')
         axes[1].imshow(out_im), axes[1].set_title('out')
         if args.GT:
-            axes[2].imshow(color), axes[2].set_title('GT')
+            axes[2].imshow(gt), axes[2].set_title('GT')
         plt.show()
 
 
