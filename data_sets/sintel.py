@@ -39,7 +39,7 @@ def map_data(d_map: defaultdict, data: list, params: dict):
 
 class SintelDataset(Dataset):
     """ Sitel's data format dataset """
-    def __init__(self, device: str, data_sets: dict, analyze_weights=True,
+    def __init__(self, data_sets: dict, analyze_weights=True,
                  shuffle=True, mu=0, sigma=0.1, seed=42, train_split=None):
         """
         Parameters
@@ -78,11 +78,11 @@ class SintelDataset(Dataset):
         self.test_idx = {}
         self.mu = mu
         self.sigma = sigma
-        self.device = device
         self.data_sets = data_sets
         self.analyze_weights = analyze_weights
         self.train_split = train_split
         self.shuffle = shuffle
+        # self.device = device
         # if 'cuda' in self.device.type:
         #     torch.multiprocessing.set_start_method('spawn', force=True)
         random.seed(seed)
@@ -198,9 +198,9 @@ class SintelDataset(Dataset):
         for data_set in self.data_map:
             train_loaders.append(
                 DataLoader(dataset=Subset(self, indices=self.train_idx[data_set]), pin_memory=False, shuffle=True,
-                           batch_size=batch_size, collate_fn=collate_fn_random_rot90, num_workers=2))
+                           batch_size=batch_size, collate_fn=collate_fn_random_rot90, num_workers=4))
             test_loaders.append(DataLoader(dataset=Subset(self, indices=self.test_idx[data_set]), pin_memory=False,
-                                           batch_size=batch_size, collate_fn=collate_fn_random_rot90, num_workers=2))
+                                           batch_size=batch_size, collate_fn=collate_fn_random_rot90, num_workers=1))
         return train_loaders, test_loaders
 
 

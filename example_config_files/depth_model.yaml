@@ -15,4 +15,6 @@ perfomance_measurements:
     pixelwize_accuracy:
         path: ./performance_measurements.py
         type: PixelWiseAccuracy
-
+    quazipixelwize_accuracy:
+        path: ./performance_measurements.py
+        type: QuaziPixelWiseAccuracy

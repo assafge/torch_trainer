@@ -2,7 +2,7 @@ import argparse
 
 from TorchTrainer import TorchTrainer
 from time import time
-from threading import Thread
+from image_utils import pad_2d
 
 
 def get_args():
@@ -66,14 +66,12 @@ def main():
             # pil_im = Image.fromarray(im)
             # color = color.transpose(1, 2, 0)
             # inputs = trainer.dataset.transform(color/255).float().to(trainer.device)
+            color = pad_2d(color, 32)
             inputs = torch.from_numpy(np.transpose(color/255, (2, 0, 1))).float().to(trainer.device)
             inputs = inputs.unsqueeze(0)
-
             out = trainer.model(inputs)
             if segmentation:
-                print(out.shape)
                 outs = out.argmax(dim=1).squeeze()
-                print(out.shape)
                 out_im = outs.cpu().numpy()
             if not segmentation:
                 out_np = out.cpu().numpy()
@@ -91,7 +89,7 @@ def main():
             rows = 2
         fig, axes = plt.subplots(nrows=rows, ncols=1, sharex=True, sharey=True)
         axes[0].imshow(color), axes[0].set_title('in')
-        axes[1].imshow(out_im), axes[1].set_title('out')
+        axes[1].imshow(out_im, cmap='jet'), axes[1].set_title('out')
         if args.GT:
             axes[2].imshow(gt), axes[2].set_title('GT')
         plt.show()

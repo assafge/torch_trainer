@@ -140,9 +140,8 @@ class TorchTrainer:
     def init_nn(self):
         model_cls = get_class(self.cfg.model.type, file_path=self.cfg.model.path)
         self.model = model_cls(**self.cfg.model.kargs)
-        self.model.to(self.device)
         dataset_cls = get_class(self.cfg.data.type, file_path=self.cfg.data.path)
-        self.dataset = dataset_cls(self.device, **self.cfg.data.kargs)
+        self.dataset = dataset_cls(**self.cfg.data.kargs)
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
