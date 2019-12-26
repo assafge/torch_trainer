@@ -5,7 +5,11 @@ kargs:
     shuffle: True
     sigma: 3   # 8bit scale
     seed: 42
-    train_split: 0.9
+    train_split: 0.95
+    analyze_weights: False
+    weights: [0., 0.03316567, 0.22440682, 0.48186666, 0.62885308, 0.74655857,
+                  0.80871344, 1., 0.90073834, 0.94499535, 0.80937949, 0.57753841,
+                  0.39920766, 0.48943669, 0.64485143, 0.01449703] #sintel tau and monkaa
     data_sets:
         sintel:
             img_dir: /media/yotamg/bd0eccc9-4cd5-414c-b764-c5a7890f9785/Yotam/Sintel/cont_filtered_dn_1100/rgb/
@@ -21,5 +25,11 @@ kargs:
             depth_suffix: _GT.dpt
             scene_separator: _
             split_method: even
-
+        monkka:
+            img_dir: /home/assaf/data/monkaa/dn1100_D_tmp2.28/rgb
+            depth_dir: /home/assaf/data/monkaa/dn1100_D_tmp2.28/disc_GT
+            img_suffix: _1100_maskImg.png
+            depth_suffix: _GT.dpt
+            scene_separator: _x2
+            split_method: even
 loader_kargs:

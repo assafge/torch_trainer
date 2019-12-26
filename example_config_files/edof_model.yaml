@@ -1,12 +1,19 @@
 type: EdofNet
-path: /home/assafg/EDOF/edof_models.py
+path: ./models/edof_models.py
 batch_size: 64
-epochs: 300
+epochs: 400
 kargs:
   max_dilation: 7
 
-loss: SmoothL1Loss
+loss: SSIM_Loss
+loss_module_path: pytorch_msssim
 loss_kargs:
+  data_range: 1
+#  K: [0.01, 0.4]
 
-perfomance_measurements:
+train_traces:
 
+test_traces:
+  pixelwize_accuracy:
+    path: ./traces.py
+    type: ImageTrace

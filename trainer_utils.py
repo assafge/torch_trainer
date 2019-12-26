@@ -3,13 +3,10 @@ import re
 import os.path
 from importlib import import_module
 import sys
-
-from textwrap import wrap
 import itertools
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import confusion_matrix
-import _thread
 import threading
 
 
@@ -21,11 +18,11 @@ def get_class(class_name, file_path: str = None, module_path: str = None):
             sys.path.append(os.path.dirname(file_path))
             module = import_module(os.path.basename(file_path.replace('.py', '')))
     elif module_path:
-        try:
-            module = import_module(module_path)
-        except ImportError:
-            sys.path.append(os.path.dirname(file_path))
-            module = import_module(os.path.basename(file_path.replace('.py', '')))
+        # try:
+        module = import_module(module_path)
+        # except ImportError:
+        #     sys.path.append(os.path.dirname(file_path))
+        #     module = import_module(os.path.basename(file_path.replace('.py', '')))
     else:
         raise Exception('module path or file path are required')
     return getattr(module, class_name)
@@ -129,6 +126,7 @@ def plot_confusion_matrix(correct_labels, predict_labels, labels=None, title='Co
     # Now we can save it to a numpy array.
     data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
     data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    plt.close(fig)
     return data
 
 def raw_input_with_timeout(timeout=2.0):

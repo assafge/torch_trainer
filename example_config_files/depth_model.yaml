@@ -11,10 +11,12 @@ loss_kargs:
     ignore_index: 0
     reduction: mean
 
-perfomance_measurements:
+train_traces:
+
+test_traces:
     pixelwize_accuracy:
-        path: ./performance_measurements.py
+        path: ./traces.py
         type: PixelWiseAccuracy
     quazipixelwize_accuracy:
-        path: ./performance_measurements.py
+        path: ./traces.py
         type: QuaziPixelWiseAccuracy

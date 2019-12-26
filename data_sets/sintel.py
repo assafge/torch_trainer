@@ -8,7 +8,7 @@ from glob import glob
 from torch.utils.data import Dataset, DataLoader, Subset
 import sys
 sys.path.append('../')
-from image_utils import random_dual_augmentation, collate_fn_random_rot90
+from image_utils import random_dual_augmentation, coll_fn_rand_rot90_float_long
 from skimage.io import imsave
 
 
@@ -39,7 +39,7 @@ def map_data(d_map: defaultdict, data: list, params: dict):
 
 class SintelDataset(Dataset):
     """ Sitel's data format dataset """
-    def __init__(self, data_sets: dict, analyze_weights=True,
+    def __init__(self, data_sets: dict, analyze_weights=False, weights=None,
                  shuffle=True, mu=0, sigma=0.1, seed=42, train_split=None):
         """
         Parameters
@@ -77,7 +77,7 @@ class SintelDataset(Dataset):
         self.train_idx = {}
         self.test_idx = {}
         self.mu = mu
-        self.sigma = sigma
+        self.sigma = sigma / 255
         self.data_sets = data_sets
         self.analyze_weights = analyze_weights
         self.train_split = train_split
@@ -86,6 +86,8 @@ class SintelDataset(Dataset):
         # if 'cuda' in self.device.type:
         #     torch.multiprocessing.set_start_method('spawn', force=True)
         random.seed(seed)
+        if weights:
+            self.weights = np.array([float(w) for w in weights], dtype=np.float32)
 
     def prepare_data(self):
         for data_set, data_params in self.data_sets.items():
@@ -135,9 +137,10 @@ class SintelDataset(Dataset):
             self.weights = 1 / (h + 1)
             self.weights[0] = 0
             self.weights = self.weights / np.max(self.weights)
-            print('weights:', self.weights)
+        print('weights:', self.weights)
 
-    def depth_read(self, filename):
+    @staticmethod
+    def depth_read(filename):
         """ Read depth data from file, return as numpy array.
         this method (with minor modifications by me) originally came with the:
         MPI-Sintel low-level computer vision benchmark.
@@ -162,7 +165,7 @@ class SintelDataset(Dataset):
         img_path, dpt_path = self.data[item]
         img = imread(img_path).astype(np.float32) / 255
         dpt = self.depth_read(dpt_path)
-        sample, label = random_dual_augmentation(image=img, label=dpt, sigma=self.sigma / 255, pad_divisor=32)
+        sample, label = random_dual_augmentation(img, dpt, self.sigma, pad_divisor=32, do_transpose=True)
         return sample, label
 
     def __len__(self):
@@ -198,9 +201,9 @@ class SintelDataset(Dataset):
         for data_set in self.data_map:
             train_loaders.append(
                 DataLoader(dataset=Subset(self, indices=self.train_idx[data_set]), pin_memory=False, shuffle=True,
-                           batch_size=batch_size, collate_fn=collate_fn_random_rot90, num_workers=4))
+                           batch_size=batch_size, collate_fn=coll_fn_rand_rot90_float_long, num_workers=4))
             test_loaders.append(DataLoader(dataset=Subset(self, indices=self.test_idx[data_set]), pin_memory=False,
-                                           batch_size=batch_size, collate_fn=collate_fn_random_rot90, num_workers=1))
+                                           batch_size=batch_size, collate_fn=coll_fn_rand_rot90_float_long))
         return train_loaders, test_loaders
 
 
