@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import sys
 if True:
+    import os
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
     import matplotlib.pyplot as plt
     plt.switch_backend('tkagg')
     sys.path.append('/home/assaf/workspace/noise_flow')

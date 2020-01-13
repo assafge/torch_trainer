@@ -1,7 +1,7 @@
 import numpy as np
 from torch.utils.data import Dataset, random_split, DataLoader
 from torch import manual_seed
-from image_utils import random_dual_augmentation, coll_fn_rand_rot90_float, MyNoiseFlowWrapper
+from image_utils import random_dual_augmentation, MyNoiseFlowWrapper
 
 
 class NumpyMatDataset(Dataset):

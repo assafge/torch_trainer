@@ -5,10 +5,12 @@ epochs: 400
 kargs:
   max_dilation: 7
 
-loss: SSIM_Loss
+loss: MS_SSIM_Loss
 loss_module_path: pytorch_msssim
 loss_kargs:
   data_range: 1
+  weights: [0.0448, 0.2856, 0.3001]
+  mix_alpha: 0.84
 #  K: [0.01, 0.4]
 
 train_traces:
