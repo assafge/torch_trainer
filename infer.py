@@ -42,7 +42,6 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray,
     in_img = crop_center(in_img, min(2048, in_img.shape[0]), min(2048, in_img.shape[1]))
     in_img = pad_2d(in_img, 32).astype(np.float32)
 
-
     inputs = torch.from_numpy(np.transpose(in_img, (2, 0, 1))).float().to(trainer.device)
     inputs = inputs.unsqueeze(0)
     out = trainer.model(inputs)
@@ -88,22 +87,24 @@ def save_image(img, in_im_path, out_dir):
         os.makedirs(out_dir)
     out_path = os.path.join(out_dir, out_name)
     out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(out_path, out_im * (255 / np.max(out_im)))
+    cv2.imwrite(out_path, out_im)
 
 
 def display_result(GT_path, trainer, out_im, in_img, rot90):
     if rot90:
         out_im = np.rot90(out_im)
         in_img = np.rot90(in_img)
+    if out_im.ndim == 2:
+        cmap = 'jet'
+    else:
+        cmap = 'gray'
     if GT_path:
         gt = trainer.dataset.depth_read(GT_path)
         if rot90:
             gt = np.rot90(gt)
         rows = 3
-        cmap = 'jet'
     else:
         rows = 2
-        cmap = 'gray'
     fig, axes = plt.subplots(nrows=1, ncols=rows, sharex=True, sharey=True)
     axes[0].imshow(in_img), axes[0].set_title('in')
     axes[1].imshow(out_im, cmap=cmap), axes[1].set_title('out')
@@ -126,7 +127,7 @@ def get_args():
                         help='select the number of random images, taken from a data set')
     parser.add_argument('-r', '--rot90', action='store_true', default=False)
     parser.add_argument('-b', '--bit_depth', type=int, default=8, help='input image bit depth')
-    parser.add_argument('--im_pattern', default='*mask.*', help='images regex pattern')
+    parser.add_argument('-m', '--im_pattern', default='*mask.*', help='images regex pattern')
     # parser.add_argument('--check_patt', default='*mask.tif', help='input image file pattern')
 
 
@@ -145,6 +146,7 @@ def main():
             if len(args.images_path) == 1 and os.path.isdir(args.images_path[0]):
                 # given path is a directory
                 images = glob(os.path.join(args.images_path[0], args.im_pattern))
+                assert len(images) > 0, "ERROR - images lis is empty, check parameters \n{}".format(vars(args))
             else:
                 # list of images
                 images = args.images_path

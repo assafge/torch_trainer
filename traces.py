@@ -47,6 +47,7 @@ class ImageTrace(Trace):
         self.step = 0
         self.pred = None
         self.lbl = None
+        self.dataformat = 'CHW'
 
     def add_measurement(self, predictions: torch.Tensor, labels: torch.Tensor):
         if not self.did_wrote:
@@ -56,19 +57,25 @@ class ImageTrace(Trace):
 
     def write_epoch(self, step):
         self.did_wrote = False
-        self.writer.add_image('Predicted', self.pred, global_step=step, dataformats='CHW')
-        self.writer.add_image('GT', self.lbl, global_step=step, dataformats='CHW')
+        self.writer.add_image('Predicted', self.pred, global_step=step, dataformats=self.dataformat)
+        self.writer.add_image('GT', self.lbl, global_step=step, dataformats=self.dataformat)
         self.step = step
 
+class DepthImageTrace(ImageTrace):
+    def __init__(self, writer: SummaryWriter, mini_batches: int):
+        super().__init__(writer, mini_batches)
+        self.dataformat = 'HW'
 
 class ClassificationImageTrace(ImageTrace):
+    def __init__(self, writer: SummaryWriter, mini_batches: int):
+        super().__init__(writer, mini_batches)
+        self.dataformat = 'HW'
+
     def add_measurement(self, predictions: torch.Tensor, labels: torch.Tensor):
         if not self.did_wrote:
             classes = predictions[0].shape[0]
-            im = (predictions[0].argmax(dim=0).cpu().numpy() * (255 / classes)).astype(np.uint8)
-            ref = (labels[0].cpu().numpy() * (255 / classes)).astype(np.uint8)
-            self.writer.add_image('Predicted', im, global_step=self.step, dataformats='HW')
-            self.writer.add_image('GT', ref, global_step=self.step, dataformats='HW')
+            self.pred = (predictions[0].argmax(dim=0).cpu().numpy() * (255 / classes)).astype(np.uint8)
+            self.lbl = (labels[0].cpu().numpy() * (255 / classes)).astype(np.uint8)
             self.did_wrote = True
 
 class ConfusionMatrix(ImageTrace):

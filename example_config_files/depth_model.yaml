@@ -1,6 +1,6 @@
 path: ./models/edof_models.py
 type: Net
-batch_size: 16
+batch_size: 14
 epochs: 300
 kargs:
     target_mode: 
@@ -20,3 +20,6 @@ test_traces:
     quazipixelwize_accuracy:
         path: ./traces.py
         type: QuaziPixelWiseAccuracy
+    image_trace:
+        path: ./traces.py
+        type: ClassificationImageTrace

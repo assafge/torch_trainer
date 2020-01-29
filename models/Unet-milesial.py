@@ -75,26 +75,24 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 
-
-""" Full assembly of the parts to form the complete network """
-
+# Full assembly of the parts to form the complete network
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, filters=64, bilinear=True):
+    def __init__(self, n_channels, n_classes, scale_channels=64, bilinear=True):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
 
-        self.inc = DoubleConv(n_channels, filters)
-        self.down1 = Down(filters, filters * 2)
-        self.down2 = Down(filters * 2, filters * 4)
-        self.down3 = Down(filters * 4, filters * 8)
-        self.down4 = Down(filters * 8, filters * 8)
-        self.up1 = Up(filters * 16, filters * 4, bilinear)
-        self.up2 = Up(filters * 8, filters * 2, bilinear)
-        self.up3 = Up(filters * 4, filters, bilinear)
-        self.up4 = Up(filters * 2, filters, bilinear)
-        self.outc = OutConv(filters, n_classes)
+        self.inc = DoubleConv(n_channels, scale_channels)
+        self.down1 = Down(scale_channels, scale_channels * 2)
+        self.down2 = Down(scale_channels * 2, scale_channels * 4)
+        self.down3 = Down(scale_channels * 4, scale_channels * 8)
+        self.down4 = Down(scale_channels * 8, scale_channels * 8)
+        self.up1 = Up(scale_channels * 16, scale_channels * 4, bilinear)
+        self.up2 = Up(scale_channels * 8, scale_channels * 2, bilinear)
+        self.up3 = Up(scale_channels * 4, scale_channels, bilinear)
+        self.up4 = Up(scale_channels * 2, scale_channels, bilinear)
+        self.outc = OutConv(scale_channels, n_classes)
 
     def forward(self, x):
         x1 = self.inc(x)
@@ -107,9 +105,12 @@ class UNet(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         logits = self.outc(x)
-        return logits
-
         if self.n_classes > 1:
-            return F.softmax(x, dim=1)
+            return logits
         else:
-            return torch.sigmoid(x)
+            return torch.squeeze(logits, dim=1)
+
+        # if self.n_classes > 1:
+        #     return F.softmax(x, dim=1)
+        # else:
+        #     return torch.sigmoid(x)

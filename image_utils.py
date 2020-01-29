@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import sys
-if True:
+if False:
     import os
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
     import matplotlib.pyplot as plt
@@ -86,6 +86,15 @@ def pad_2d(img: np.ndarray, divisor) -> np.ndarray:
         return np.pad(img, pad_width=((top, bottom), (left, right), (0, 0)), mode='constant')
     else:
         return np.pad(img, pad_width=((top, bottom), (left, right)), mode='constant')
+
+
+def random_crop(img, label, patch_size, edge_border):
+    height, width = img.shape[:2]
+    h_c = int(np.random.rand() * (height - (edge_border * 2) - patch_size)) + edge_border
+    w_c = int(np.random.rand() * (width - (edge_border * 2) - patch_size)) + edge_border
+    img = img[h_c:h_c + patch_size, w_c:w_c + patch_size]
+    label = label[h_c:h_c + patch_size, w_c:w_c + patch_size]
+    return img, label
 
 
 def random_dual_augmentation(image, label, sigma, pad_divisor=0, img_min=0, im_max=1, align_to_tensor=True,

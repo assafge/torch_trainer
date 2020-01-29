@@ -3,9 +3,9 @@ type: SintelDataset
 kargs:
 
     shuffle: True
-    sigma: 3   # 8bit scale
+    sigma: 8   # 8bit scale
     seed: 42
-    train_split: 0.95
+    train_split: 0.9
     analyze_weights: False
     weights: [0., 0.03316567, 0.22440682, 0.48186666, 0.62885308, 0.74655857,
                   0.80871344, 1., 0.90073834, 0.94499535, 0.80937949, 0.57753841,
@@ -26,8 +26,8 @@ kargs:
             scene_separator: _
             split_method: even
         monkka:
-            img_dir: /home/assaf/data/monkaa/dn1100_D_tmp2.28/rgb
-            depth_dir: /home/assaf/data/monkaa/dn1100_D_tmp2.28/disc_GT
+            img_dir: /home/assaf/data/Datasets/monkaa/dn1100_D_tmp2.28/rgb
+            depth_dir: /home/assaf/data/Datasets/monkaa/dn1100_D_tmp2.28/disc_GT
             img_suffix: _1100_maskImg.png
             depth_suffix: _GT.dpt
             scene_separator: _x2

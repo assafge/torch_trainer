@@ -8,7 +8,7 @@ from glob import glob
 from torch.utils.data import Dataset, DataLoader, Subset
 import sys
 sys.path.append('../')
-from image_utils import random_dual_augmentation, coll_fn_rand_rot90_float_long
+from image_utils import random_dual_augmentation, coll_fn_rand_rot90_float_long, coll_fn_rand_rot90_float
 from skimage.io import imsave
 
 
@@ -40,7 +40,7 @@ def map_data(d_map: defaultdict, data: list, params: dict):
 class SintelDataset(Dataset):
     """ Sitel's data format dataset """
     def __init__(self, data_sets: dict, analyze_weights=False, weights=None,
-                 shuffle=True, mu=0, sigma=0.1, seed=42, train_split=None):
+                 shuffle=True, mu=0, sigma=0.1, seed=42, train_split=None, continuous=False):
         """
         Parameters
         ----------
@@ -82,21 +82,25 @@ class SintelDataset(Dataset):
         self.analyze_weights = analyze_weights
         self.train_split = train_split
         self.shuffle = shuffle
+        self.continuous = continuous
         # self.device = device
         # if 'cuda' in self.device.type:
         #     torch.multiprocessing.set_start_method('spawn', force=True)
         random.seed(seed)
         if weights:
             self.weights = np.array([float(w) for w in weights], dtype=np.float32)
+        else:
+            self.weights = None
 
     def prepare_data(self):
-        for data_set, data_params in self.data_sets.items():
+        for data_set in sorted(self.data_sets.keys()):  # sorting is important for reproduction
+            data_params = self.data_sets[data_set]
             d_map = self.data_map[data_set] = defaultdict(list)  # list of indexes in data
             split_method = data_params['split_method']
             # prepare the data according to split method
             if 'scene' in split_method or 'even' in split_method:
                 map_data(d_map, self.data, data_params)
-                assert len(self.data) > 0, "ERROR - dataset is empty - check dataset parameters"
+                assert data_params['_len_'] > 0, "ERROR - dataset {} is empty - check dataset parameters".format(data_set)
                 if 'scene' in split_method:
                     test_scene = split_method.replace('scene_', '')
                     test_idx = np.array(d_map[test_scene], dtype=np.int)
@@ -132,15 +136,26 @@ class SintelDataset(Dataset):
             #             if os.path.exists(depth_path):
             #                 self.data.append((img_path, depth_path))
             print('added data set {} with {} images'.format(data_set, data_params['_len_']))
+            assert data_params['_len_'] > 0, 'ERROR - dataset {} is empty. img dir: {} depth dir: {}'.\
+                format(data_set, data_params.img_dir, data_params.depth_dir)
         if self.analyze_weights:
             h = self.analyze_depth(display=False)
             self.weights = 1 / (h + 1)
             self.weights[0] = 0
             self.weights = self.weights / np.max(self.weights)
-        print('weights:', self.weights)
+        with open('/tmp/train_id.txt', 'w') as f:
+            for data_set in sorted(self.data_sets.keys()):
+                for id in self.train_idx[data_set]:
+                    f.write('{}{}'.format(id, os.linesep))
+        with open('/tmp/test_id.txt', 'w') as f:
+            for data_set in sorted(self.data_sets.keys()):
+                for id in self.test_idx[data_set]:
+                    f.write('{}{}'.format(id, os.linesep))
+        if self.weights is not None:
+            print('weights:', self.weights)
 
     @staticmethod
-    def depth_read(filename):
+    def depth_read(filename: str) -> np.ndarray:
         """ Read depth data from file, return as numpy array.
         this method (with minor modifications by me) originally came with the:
         MPI-Sintel low-level computer vision benchmark.
@@ -166,6 +181,8 @@ class SintelDataset(Dataset):
         img = imread(img_path).astype(np.float32) / 255
         dpt = self.depth_read(dpt_path)
         sample, label = random_dual_augmentation(img, dpt, self.sigma, pad_divisor=32, do_transpose=True)
+        # if self.continuous:
+        #     label = np.expand_dims(label, 0)
         return sample, label
 
     def __len__(self):
@@ -198,12 +215,13 @@ class SintelDataset(Dataset):
         self.prepare_data()
         train_loaders = []
         test_loaders = []
+        coll_fn = coll_fn_rand_rot90_float if self.continuous else coll_fn_rand_rot90_float_long()
         for data_set in self.data_map:
             train_loaders.append(
-                DataLoader(dataset=Subset(self, indices=self.train_idx[data_set]), pin_memory=False, shuffle=True,
-                           batch_size=batch_size, collate_fn=coll_fn_rand_rot90_float_long, num_workers=4))
+                DataLoader(dataset=Subset(self, indices=self.train_idx[data_set]), pin_memory=True, shuffle=True,
+                           batch_size=batch_size, collate_fn=coll_fn, num_workers=6))
             test_loaders.append(DataLoader(dataset=Subset(self, indices=self.test_idx[data_set]), pin_memory=False,
-                                           batch_size=batch_size, collate_fn=coll_fn_rand_rot90_float_long))
+                                           batch_size=batch_size, collate_fn=coll_fn, num_workers=4))
         return train_loaders, test_loaders
 
 

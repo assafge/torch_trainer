@@ -16,16 +16,17 @@ def crop_center(img,cropy,cropx):
     return img[sy:sy+cropy, sx:sx+cropx]
 
 class MultiViewer:
-    def __init__(self, list_of_folders):
+    def __init__(self, list_of_folders, factors):
         n_views = len(list_of_folders)
+        self.factors = factors
         cols = 2
         if n_views > 4:
             cols = 3
         rows = int((n_views / cols) + 0.5)
         self.fig, axis = plt.subplots(nrows=rows, ncols=cols, sharex=True, sharey=True, figsize=(8,8))
         self.axis = axis.reshape(-1)[:len(list_of_folders)]
-        for ax, folder in zip(self.axis, ['input/results'] + list_of_folders[1:]):
-            ax.set_title(os.path.basename(os.path.dirname(folder)))
+        for ax, folder in zip(self.axis, ['input'] + list_of_folders[1:]):
+            ax.set_title(os.path.basename(folder))
         self.next_images = []
         self.im_name = ''
         self.generator = self.images_generator(list_of_folders)
@@ -68,9 +69,11 @@ class MultiViewer:
             im_name = os.path.basename(im_path)
             if all(im_name in f_map[folder] for folder in list_of_folders[1:]):
                 images = []
-                for folder in list_of_folders:
+                for ind, folder in enumerate(list_of_folders):
                     im = plt.imread(os.path.join(folder, im_name))
                     im = crop_center(im, 2048, 2048)
+                    if ind == 0 and self.factors is not None:
+                        im = im * self.factors
                     images.append(im)
                 self.next_images = images
                 self.im_name = im_name
@@ -79,9 +82,11 @@ class MultiViewer:
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('folders', nargs='+')
+    parser.add_argument('root_folder')
+    parser.add_argument('models', nargs='+')
+    parser.add_argument('-f', '--factors', nargs='+', type=float, default=None)
     args = parser.parse_args()
-    viewer = MultiViewer(args.folders)
+    viewer = MultiViewer(args.folders, args.factors)
 
 
 

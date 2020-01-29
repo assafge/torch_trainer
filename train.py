@@ -17,6 +17,8 @@ def get_args():
     new.add_argument('-e', '--exp_name', default='')
     pre_train = parser.add_argument_group('pre-trained')
     pre_train.add_argument('-r', '--model_path', help='path to pre-trained model')
+    pre_train.add_argument('-s', '--strict_load', help='set to false to use pre-trained parts from another model',
+                           action='store_false', default=True)
 
 
     args = parser.parse_args()

@@ -115,14 +115,14 @@ class TorchTrainer:
         return cls
 
     @classmethod
-    def warm_startup(cls, root, gpu_index, logger=None):
+    def warm_startup(cls, root, gpu_index, strict, logger=None):
         config_dict = read_yaml(os.path.join(root, 'cfg.yaml'))
         for cfg_section, cfg_dict in config_dict.items():
             config_dict[cfg_section] = ConfigurationStruct(cfg_dict)
         config = ConfigurationStruct(config_dict)
         cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index, logger=logger)
         cls.init_nn()
-        cls.load_checkpoint()
+        cls.load_checkpoint(strict)
         return cls
 
     def init_nn(self):
@@ -133,13 +133,13 @@ class TorchTrainer:
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
-    def load_checkpoint(self):
+    def load_checkpoint(self, strict):
         latest = None
         epoch = -1
         cp_path = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth')
         if not os.path.exists(cp_path):
             cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
-        checkpoint = torch.load(cp_path, map_location=self.device)
+        checkpoint = torch.load(cp_path, map_location=self.device, strict=strict)
         self.epoch = checkpoint['epoch']
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -173,11 +173,12 @@ class TorchTrainer:
         return train, test
 
     def train(self):
-        if 'weights' in vars(self.dataset) and self.dataset.weights is not None:
-            self.cfg.model.loss_kargs.update({
-                'weight': torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)})
+        if 'weights' in vars(self.dataset):
+            if self.dataset.weights is not None:
+                self.cfg.model.loss_kargs.update({
+                    'weight': torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)})
         criterion_cls = get_class(self.cfg.model.loss, module_path=self.cfg.model.loss_module_path if
-                                  self.cfg.model.loss_module_path else 'torch.nn')
+                                  'loss_module_path' in vars(self.cfg.model) else 'torch.nn')
         criterion = criterion_cls(**self.cfg.model.loss_kargs)
 
         self.model.zero_grad()
@@ -192,6 +193,7 @@ class TorchTrainer:
                 if not self.running:
                     break
                 train.init_loop()
+                tt = time()
                 for x, y in train_loader:
                     data, labels = x.to(self.device), y.to(self.device)
                     output = self.model(data)
