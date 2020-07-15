@@ -1,7 +1,7 @@
 #! /home/assaf/EDOF/venv/bin/python
 
 import torch
-from trainer_utils import read_yaml, get_class, print_progress, plot_confusion_matrix
+from general_utils import read_yaml, get_class, print_progress
 import os
 from shutil import rmtree
 from datetime import datetime
@@ -10,6 +10,10 @@ from torch.utils.tensorboard import SummaryWriter
 from traces import Trace
 from typing import List
 import yaml
+
+# debug
+import numpy as np
+import cv2
 
 
 class ConfigurationStruct:
@@ -21,7 +25,9 @@ class ConfigurationStruct:
 
 
 class UtilityObj:
-    def __init__(self, loaders, writer_path, measurements: dict = {}):
+    def __init__(self, loaders, writer_path, measurements=None):
+        if measurements is None:
+            measurements = {}
         if type(loaders) is list:
             self.loaders = loaders
         elif type(loaders) is torch.utils.data.DataLoader:
@@ -41,9 +47,9 @@ class UtilityObj:
                 cls_ = get_class(meas['type'], meas['path'])
                 self.traces.append(cls_(self.writer, self.size))
 
-    def step(self, loss, pred, labels, epoch):
+    def step(self, loss, inputs, pred, labels, epoch):
         for m in self.traces:
-            m.add_measurement(pred, labels)
+            m.add_measurement(inputs, pred, labels)
         print_progress(iteration=self.index, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
                        suffix=' running loss=%0.3f' % loss if loss > 0.1 else ' running loss=%0.3e' % loss)
         self.aggregated_loss += loss
@@ -67,6 +73,7 @@ class UtilityObj:
     @property
     def size(self):
         return sum([len(loader) for loader in self.loaders])
+
 
 
 class TorchTrainer:
@@ -139,14 +146,21 @@ class TorchTrainer:
         cp_path = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth')
         if not os.path.exists(cp_path):
             cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
-        checkpoint = torch.load(cp_path, map_location=self.device, strict=strict)
+        checkpoint = torch.load(cp_path, map_location=self.device)
         self.epoch = checkpoint['epoch']
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        for state in self.optimizer.state.values():
-            for k, v in state.items():
-                if isinstance(v, torch.Tensor):
-                    state[k] = v.to(self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
+        if not strict:
+            print('non strict', self.model.fine_tune_)
+            if self.model.fine_tune is not None and self.cfg.model.fine_tune_kargs is not None:
+                self.model.fine_tune(**self.cfg.model.fine_tune_kargs)
+            optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
+            self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
+        else:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            for state in self.optimizer.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.to(self.device)
         self.model.to(self.device)
 
     def save_checkpoint(self, better):
@@ -195,13 +209,13 @@ class TorchTrainer:
                 train.init_loop()
                 tt = time()
                 for x, y in train_loader:
-                    data, labels = x.to(self.device), y.to(self.device)
-                    output = self.model(data)
+                    inputs, labels = x.to(self.device), y.to(self.device)
+                    outputs = self.model(inputs)
                     self.optimizer.zero_grad()
-                    loss = criterion(output, labels)
+                    loss = criterion(outputs, labels)
                     loss.backward()
                     self.optimizer.step()
-                    train.step(loss.item(), output, labels, self.epoch)
+                    train.step(loss.item(), inputs, outputs, labels, self.epoch)
             train.epoch_step(self.epoch)
 
             if self.epoch % 3 == 0 and self.running:
@@ -209,11 +223,12 @@ class TorchTrainer:
                 test.init_loop()
                 for test_loader in test.loaders:
                     for x, y in test_loader:
-                        data, labels = x.to(self.device), y.to(self.device)
+                        inputs, labels = x.to(self.device), y.to(self.device)
                         with torch.no_grad():
-                            output = self.model(data)
-                            loss = criterion(output, labels)
-                            test.step(loss.item(), output, labels, self.epoch)
+                            outputs = self.model(inputs)
+                            loss = criterion(outputs, labels)
+                            test.step(loss.item(), inputs, outputs, labels, self.epoch)
+                # self.save_to_debug(inputs, outputs, labels)
                 test.epoch_step(self.epoch)
 
             if test.aggregated_loss < best_loss:
@@ -232,4 +247,18 @@ class TorchTrainer:
 
 
         self.running = False
+
+
+    def save_to_debug(self, inputs, outputs, labels):
+        out_path = '/tmp/minibatch_debug'
+        if not os.path.isdir(out_path):
+            os.makedirs(out_path)
+        for i in range(outputs.shape[0]):
+            inp = np.transpose((inputs[i].cpu().numpy() * 255).astype(np.uint8), (2, 1, 0))
+            pred = np.transpose((outputs[i].cpu().numpy() * 255).astype(np.uint8), (2, 1, 0))
+            lbl = np.transpose((labels[i].cpu().numpy() * 255).astype(np.uint8), (2, 1, 0))
+            cv2.imwrite('{}/{}_input.png'.format(out_path, i), cv2.cvtColor(inp, cv2.COLOR_RGB2BGR))
+            cv2.imwrite('{}/{}_predict.png'.format(out_path, i), cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
+            cv2.imwrite('{}/{}_label.png'.format(out_path, i), cv2.cvtColor(lbl, cv2.COLOR_RGB2BGR))
+
 

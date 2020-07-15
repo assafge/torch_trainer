@@ -17,7 +17,7 @@ def get_args():
     new.add_argument('-e', '--exp_name', default='')
     pre_train = parser.add_argument_group('pre-trained')
     pre_train.add_argument('-r', '--model_path', help='path to pre-trained model')
-    pre_train.add_argument('-s', '--strict_load', help='set to false to use pre-trained parts from another model',
+    pre_train.add_argument('-s', '--non_strict', help='set to false to use pre-trained parts from another model',
                            action='store_false', default=True)
 
 
@@ -30,7 +30,7 @@ def main():
     args = get_args()
 
     if args.model_path:
-        trainer = TorchTrainer.warm_startup(root=args.model_path, gpu_index=args.gpu_index)
+        trainer = TorchTrainer.warm_startup(root=args.model_path, gpu_index=args.gpu_index, strict=args.non_strict)
     else:
         trainer = TorchTrainer.new_train(out_path=args.out_path, model_cfg=args.model_cfg, optimizer_cfg=args.optimizer_cfg,
                                          dataset_cfg=args.dataset_cfg, gpu_index=args.gpu_index, exp_name=args.exp_name)

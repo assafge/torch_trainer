@@ -1,6 +1,7 @@
 import numpy as np
 import torch
-import sys
+
+'''
 if False:
     import os
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
@@ -59,9 +60,11 @@ if False:
             # Merge arrays (from tuple of 3D to 4D).
             images = np.stack(images, 0)
             # import cv2
-            # cv2.imwrite('/tmp/1.png', cv2.cvtColor((images[0].transpose(1, 2, 0) * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
+            # cv2.imwrite('/tmp/1.png', cv2.cvtColor((images[0].transpose(1, 2, 0) * 255).astype(np.uint8),
+                          cv2.COLOR_RGB2BGR))
             self.make_noise(images)
-            # cv2.imwrite('/tmp/2.png', cv2.cvtColor((images[0].transpose(1, 2, 0) * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
+            # cv2.imwrite('/tmp/2.png', cv2.cvtColor((images[0].transpose(1, 2, 0) * 255).astype(np.uint8),
+                          cv2.COLOR_RGB2BGR))
             labels = np.stack(labels, 0)
             if np.random.rand() > 0.5:
                 images = np.rot90(images, axes=(2, 3))
@@ -72,12 +75,13 @@ if False:
             im_tensor = torch.as_tensor(data=np.ascontiguousarray(images), dtype=torch.float32)
             lbl_tensor = torch.as_tensor(data=np.ascontiguousarray(labels), dtype=torch.float32)
             return im_tensor, lbl_tensor
-
-
+'''
 
 
 def pad_2d(img: np.ndarray, divisor) -> np.ndarray:
     """return padded image to shape of nearest divisor"""
+    if np.sum(np.array(img.shape[:2]) % divisor) == 0:
+        return img
     expand = divisor - (np.array(img.shape[:2]) % divisor)
     expand = np.bitwise_xor(expand, divisor)
     top, left = expand // 2
@@ -98,7 +102,7 @@ def random_crop(img, label, patch_size, edge_border):
 
 
 def random_dual_augmentation(image, label, sigma, pad_divisor=0, img_min=0, im_max=1, align_to_tensor=True,
-                             augmentations=[np.flipud, np.fliplr], do_transpose=False):
+                             augmentations=(np.flipud, np.fliplr), do_transpose=False):
     """torch transformations cannot be applied to a pair of images, so I've decided to implement in numpy."""
     if sigma > 0:
         gauss = np.random.normal(0, sigma, image.shape).astype(image.dtype)
@@ -119,6 +123,20 @@ def random_dual_augmentation(image, label, sigma, pad_divisor=0, img_min=0, im_m
             label = np.transpose(label, (2, 0, 1))
     return image, label
 
+
+def base_collate_fn(data):
+    """Creates mini-batch tensors from the list of tuples (image, caption)."""
+    images, labels = zip(*data)
+    # Merge arrays (from tuple of 3D to 4D).
+    images = np.stack(images, 0)
+    labels = np.stack(labels, 0)
+    im_tensor = torch.as_tensor(data=np.ascontiguousarray(images), dtype=torch.float32)
+    lbl_tensor = torch.as_tensor(data=np.ascontiguousarray(labels), dtype=torch.float32)
+    if im_tensor.ndim < lbl_tensor.ndim:
+        im_tensor = im_tensor.unsqueeze(1)
+    return im_tensor, lbl_tensor
+
+
 def base_collate_fn_random_rot90(data):
     """Creates mini-batch tensors from the list of tuples (image, caption)."""
     images, labels = zip(*data)
@@ -133,17 +151,20 @@ def base_collate_fn_random_rot90(data):
             labels = np.rot90(labels, axes=(1, 2))
     return images, labels
 
+
 def coll_fn_rand_rot90_float_long(data):
     images, labels = base_collate_fn_random_rot90(data)
     im_tensor = torch.as_tensor(data=np.ascontiguousarray(images), dtype=torch.float32)
     lbl_tensor = torch.as_tensor(data=np.ascontiguousarray(labels), dtype=torch.long)
     return im_tensor, lbl_tensor
 
+
 def coll_fn_rand_rot90_float(data):
     images, labels = base_collate_fn_random_rot90(data)
     im_tensor = torch.as_tensor(data=np.ascontiguousarray(images), dtype=torch.float32)
     lbl_tensor = torch.as_tensor(data=np.ascontiguousarray(labels), dtype=torch.float32)
     return im_tensor, lbl_tensor
+
 
 def myplot(im, ref):
     import matplotlib.pyplot as plt

@@ -82,6 +82,7 @@ class UNet(nn.Module):
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
+        self.scale_channels = scale_channels
 
         self.inc = DoubleConv(n_channels, scale_channels)
         self.down1 = Down(scale_channels, scale_channels * 2)
@@ -114,3 +115,8 @@ class UNet(nn.Module):
         #     return F.softmax(x, dim=1)
         # else:
         #     return torch.sigmoid(x)
+
+    def fine_tune(self, new_n_classes):
+        print('changing n classes to', new_n_classes)
+        self.n_classes = new_n_classes
+        self.outc = OutConv(self.scale_channels, new_n_classes)

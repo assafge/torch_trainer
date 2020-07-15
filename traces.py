@@ -2,7 +2,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import abc
-from trainer_utils import plot_confusion_matrix
+from general_utils import plot_confusion_matrix
+import random
 
 
 class Trace(metaclass=abc.ABCMeta):
@@ -11,7 +12,7 @@ class Trace(metaclass=abc.ABCMeta):
         self.mini_batches = mini_batches
 
     @abc.abstractmethod
-    def add_measurement(self, predictions: torch.Tensor, labels: torch.Tensor):
+    def add_measurement(self, inputs: torch.Tensor, predictions: torch.Tensor, labels: torch.Tensor):
         pass
 
     @abc.abstractmethod
@@ -29,7 +30,7 @@ class StepTrace(Trace):
 
 
 class PixelWiseAccuracy(StepTrace):
-    def add_measurement(self, predictions: torch.Tensor, labels: torch.Tensor):
+    def add_measurement(self, inputs: torch.Tensor, predictions: torch.Tensor, labels: torch.Tensor):
         self.sum += (int(torch.sum(predictions.argmax(dim=1) == labels.data).to('cpu')) / labels.data.nelement()) * 100
 
 
@@ -45,41 +46,66 @@ class ImageTrace(Trace):
         super().__init__(writer, mini_batches)
         self.did_wrote = False  # write every image once
         self.step = 0
-        self.pred = None
-        self.lbl = None
-        self.dataformat = 'CHW'
+        self.inp: np.ndarray = None
+        self.pred: np.ndarray = None
+        self.lbl: np.ndarray = None
+        self.channels = 3
 
-    def add_measurement(self, predictions: torch.Tensor, labels: torch.Tensor):
+    def add_measurement(self, inputs: torch.Tensor, predictions: torch.Tensor, labels: torch.Tensor):
         if not self.did_wrote:
-            self.pred = (predictions[0].cpu().numpy() * 255).astype(np.uint8)
-            self.lbl = (labels[0].cpu().numpy() * 255).astype(np.uint8)
+            rand_ind = int(random.random() * predictions.shape[0])
+            self.inp = (inputs[rand_ind].cpu().numpy() * 255).astype(np.uint8)
+            self.pred = (predictions[rand_ind].cpu().numpy() * 255).astype(np.uint8)
+            self.lbl = (labels[rand_ind].cpu().numpy() * 255).astype(np.uint8)
             self.did_wrote = True
 
     def write_epoch(self, step):
         self.did_wrote = False
-        self.writer.add_image('Predicted', self.pred, global_step=step, dataformats=self.dataformat)
-        self.writer.add_image('GT', self.lbl, global_step=step, dataformats=self.dataformat)
+        if self.channels == 1:
+            h = self.inp.shape[0]
+            w = self.inp.shape[1] * 3
+        else:
+            h = self.inp.shape[1]
+            w = self.inp.shape[2] * 3
+        out = np.zeros((3, h, w), dtype=np.uint8)
+        out[:, :, :w//3] = self.inp
+        out[:, :, w//3:2*(w//3)] = self.pred
+        out[:, :, 2*(w//3):] = self.lbl
+        self.writer.add_image('input | predicted | label', out, global_step=step, dataformats='CHW')
         self.step = step
 
 class DepthImageTrace(ImageTrace):
     def __init__(self, writer: SummaryWriter, mini_batches: int):
         super().__init__(writer, mini_batches)
-        self.dataformat = 'HW'
+        self.channels = 1
+
+    def add_measurement(self, inputs: torch.Tensor, predictions: torch.Tensor, labels: torch.Tensor):
+        if not self.did_wrote:
+            rand_ind = int(random.random() * predictions.shape[0])
+            inp = inputs[rand_ind].cpu().numpy()
+            im = predictions[rand_ind].cpu().numpy()
+            lbl = labels[rand_ind].cpu().numpy()
+            self.inp = (inp * 255).astype(np.uint8)
+            self.pred = ((im + 5) * (255/15)).astype(np.uint8)
+            self.lbl = ((lbl + 5) * (255/15)).astype(np.uint8)
+            self.did_wrote = True
 
 class ClassificationImageTrace(ImageTrace):
     def __init__(self, writer: SummaryWriter, mini_batches: int):
         super().__init__(writer, mini_batches)
-        self.dataformat = 'HW'
+        self.channels = 1
 
-    def add_measurement(self, predictions: torch.Tensor, labels: torch.Tensor):
+    def add_measurement(self, inputs: torch.Tensor, predictions: torch.Tensor, labels: torch.Tensor):
         if not self.did_wrote:
-            classes = predictions[0].shape[0]
-            self.pred = (predictions[0].argmax(dim=0).cpu().numpy() * (255 / classes)).astype(np.uint8)
-            self.lbl = (labels[0].cpu().numpy() * (255 / classes)).astype(np.uint8)
+            classes = predictions.shape[1]
+            rand_ind = int(random.random() * predictions.shape[0])
+            self.pred = (predictions[rand_ind].argmax(dim=0).cpu().numpy() * (255 / classes)).astype(np.uint8)
+            self.lbl = (labels[rand_ind].cpu().numpy() * (255 / classes)).astype(np.uint8)
             self.did_wrote = True
 
 class ConfusionMatrix(ImageTrace):
-    def add_measurement(self, outputs, labels):
+    def add_measurement(self, inputs, outputs, labels):
+        """inputs not in use (match interface)"""
         if not self.did_wrote:
             pred = outputs.argmax(dim=1).cpu().numpy().astype(np.uint8).ravel()
             ref = labels.cpu().numpy().astype(np.uint8).ravel()

@@ -17,15 +17,6 @@ import torch
 
 __author__ = "Assaf Genosar"
 
-# def crop_center(img, target):
-#     cropy, cropx = target
-#     y, x = img.shape[:2]
-#     startx = x//2-(cropx//2)
-#     starty = y//2-(cropy//2)
-#     return img[starty:starty+cropy, startx:startx+cropx]
-
-
-
 
 @dataclass
 class DatasetParams:
@@ -149,7 +140,7 @@ class TextureDataset(Dataset):
         for data_set in self.data_map:
             train_loaders.append(
                 DataLoader(dataset=Subset(self, indices=self.train_idx[data_set]), pin_memory=True, shuffle=True,
-                           batch_size=batch_size, num_workers=8, collate_fn=coll_fn_rand_rot90_float))
+                           batch_size=batch_size, num_workers=4, collate_fn=coll_fn_rand_rot90_float))
             test_loaders.append(DataLoader(dataset=Subset(self, indices=self.test_idx[data_set]), pin_memory=False,
                                            batch_size=batch_size, num_workers=2, collate_fn=coll_fn_rand_rot90_float))
         return train_loaders, test_loaders

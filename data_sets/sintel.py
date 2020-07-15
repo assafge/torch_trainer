@@ -215,13 +215,13 @@ class SintelDataset(Dataset):
         self.prepare_data()
         train_loaders = []
         test_loaders = []
-        coll_fn = coll_fn_rand_rot90_float if self.continuous else coll_fn_rand_rot90_float_long()
+        coll_fn = coll_fn_rand_rot90_float if self.continuous else coll_fn_rand_rot90_float_long
         for data_set in self.data_map:
             train_loaders.append(
                 DataLoader(dataset=Subset(self, indices=self.train_idx[data_set]), pin_memory=True, shuffle=True,
-                           batch_size=batch_size, collate_fn=coll_fn, num_workers=6))
+                           batch_size=batch_size, collate_fn=coll_fn, num_workers=4))
             test_loaders.append(DataLoader(dataset=Subset(self, indices=self.test_idx[data_set]), pin_memory=False,
-                                           batch_size=batch_size, collate_fn=coll_fn, num_workers=4))
+                                           batch_size=batch_size, collate_fn=coll_fn, num_workers=2))
         return train_loaders, test_loaders
 
 

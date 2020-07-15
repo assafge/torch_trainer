@@ -1,0 +1,36 @@
+path: ./models/Unet-milesial.py
+type: UNet
+batch_size: 8
+epochs: 600
+kargs:
+    n_channels: 3
+#    n_classes: 16
+    n_classes: 3
+    scale_channels: 64
+#    scale_channels: 32
+    bilinear: True
+#loss: CrossEntropyLoss # SmoothL1Loss
+loss: MS_SSIM_Loss
+#loss: SmoothL1Loss
+loss_module_path: pytorch_msssim
+loss_kargs:
+    data_range: 1
+    weights: [0.0448, 0.2856, 0.3001]
+    mix_alpha: 0.84
+    K: [0.01, 0.4]
+#    ignore_index: 0
+#    reduction: mean
+
+test_traces:
+#    pixelwize_accuracy:
+#        path: ./traces.py
+#        type: PixelWiseAccuracy
+#    quazipixelwize_accuracy:
+#        path: ./traces.py
+#        type: QuaziPixelWiseAccuracy
+    image_trace:
+        path: ./traces.py
+        type: ImageTrace
+
+train_traces:
+

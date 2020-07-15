@@ -1,7 +1,7 @@
 import numpy as np
 from torch.utils.data import Dataset, random_split, DataLoader
 from torch import manual_seed
-from image_utils import random_dual_augmentation, MyNoiseFlowWrapper
+from image_utils import random_dual_augmentation # , MyNoiseFlowWrapper
 
 
 class NumpyMatDataset(Dataset):
@@ -36,7 +36,7 @@ class NumpyMatDataset(Dataset):
         train_size = int(self.train_split * len(self))
         test_size = len(self) - train_size
         manual_seed(self.seed)
-        self.noise_flow = MyNoiseFlowWrapper()
+  #      self.noise_flow = MyNoiseFlowWrapper()
         train_dataset, test_dataset = random_split(self, [train_size, test_size])
         train_data_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=self.noise_flow.nf_collate_fn_random_rot90)
         test_data_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=self.noise_flow.nf_collate_fn_random_rot90)

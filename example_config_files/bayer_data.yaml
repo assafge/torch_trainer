@@ -1,0 +1,17 @@
+path: ./data_sets/bayer.py
+type: Bayer
+kargs:
+    shuffle: True
+    train_split: 0.85
+    patch_size: 128
+    data_sets:
+        bayer_panasonic:
+            img_dir: /home/assaf/data/Datasets/MSR-Demosaicing/Dataset_LINEAR_without_noise/bayer_panasonic/input
+            ref_dir: /home/assaf/data/Datasets/MSR-Demosaicing/Dataset_LINEAR_without_noise/bayer_panasonic/groundtruth
+        bayer_canon:
+            img_dir: /home/assaf/data/Datasets/MSR-Demosaicing/Dataset_LINEAR_without_noise/bayer_canon/input
+            ref_dir: /home/assaf/data/Datasets/MSR-Demosaicing/Dataset_LINEAR_without_noise/bayer_canon/groundtruth
+        xtrans_panasonic:
+            img_dir: /home/assaf/data/Datasets/MSR-Demosaicing/Dataset_LINEAR_without_noise/xtrans_panasonic/input
+            ref_dir: /home/assaf/data/Datasets/MSR-Demosaicing/Dataset_LINEAR_without_noise/xtrans_panasonic/groundtruth
+loader_kargs:

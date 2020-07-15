@@ -5,7 +5,7 @@ epochs: 300
 kargs:
     n_channels: 3
     n_classes: 16
-    filters: 64
+    scale_channels: 64
     bilinear: True
 loss: CrossEntropyLoss
 loss_kargs:

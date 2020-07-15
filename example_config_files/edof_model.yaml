@@ -5,20 +5,22 @@ epochs: 300
 kargs:
   max_dilation: 7
 
-#loss: MS_SSIM_Loss
-#loss_module_path: pytorch_msssim
-#loss_kargs:
-#  data_range: 1
-#  weights: [0.0448, 0.2856, 0.3001]
-#  mix_alpha: 0.84
-#  K: [0.01, 0.4]
-loss: SmoothL1Loss
-loss_module_path:
+loss: MS_SSIM_Loss
+loss_module_path: pytorch_msssim
 loss_kargs:
-
-
+  data_range: 1
+  weights: [0.0448, 0.2856, 0.3001]
+  mix_alpha: 0.84
+  K: [0.01, 0.4]
+#loss: SmoothL1Loss
+#loss_module_path:
+#loss_kargs:
 
 train_traces:
+  image_trace:
+    path: ./traces.py
+    type: ImageTrace
+
 
 test_traces:
   image_trace:
