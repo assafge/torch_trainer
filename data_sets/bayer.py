@@ -86,13 +86,10 @@ class Bayer(Dataset):
         train_size = int(len(self.data) * self.train_split)
         self.train_idx = np.arange(train_size)
         self.test_idx = np.arange(train_size, len(self.data))
-        print('test images:')
-        for idx in self.test_idx:
-            print(self.data[idx][0])
-            print(self.data[idx][1])
-            print('-------')
-
-
+        with open('/tmp/test_images.txt', 'w') as f:
+            for idx in self.test_idx:
+                f.write(str(self.data[idx][0]) + os.linesep)
+        print('wrote test images to: /tmp/test_images.txt')
 
 
     def random_sample_patch(self, im, lbl, do_transpose=True):

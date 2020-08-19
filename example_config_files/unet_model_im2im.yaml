@@ -1,6 +1,6 @@
 path: ./models/Unet-milesial.py
 type: UNet
-batch_size: 8
+batch_size: 16
 epochs: 600
 kargs:
     n_channels: 3

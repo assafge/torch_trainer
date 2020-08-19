@@ -171,6 +171,8 @@ class DualCamDataset(Dataset):
         self.seed = seed
         self.patch_size = patch_size
         self.i = 0
+        self.colors = {}
+
 
     def prepare_data(self):
         last_idx = 0
@@ -191,6 +193,27 @@ class DualCamDataset(Dataset):
                     # if bbx is None:
                     #     continue
                     #     else:
+                    # if self.bi_linear_demosaic:
+                    #     im = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                    #     im = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(im, pattern='GRBG')
+                    #     img = np.clip(im, 0, 255)
+                    #     ref = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
+                    #
+                    #     r2g = img[:, :, 0] / img[:, :, 1]
+                    #     r2b = img[:, :, 0] / img[:, :, 2]
+                    #     r2g_l = ref[:, :, 0] / ref[:, :, 1]
+                    #     r2b_l = ref[:, :, 0] / ref[:, :, 2]
+                    #     R2G = np.mean(cv2.absdiff(r2g, r2g_l))
+                    #     R2B = np.mean(cv2.absdiff(r2b, r2b_l))
+                    #     print(R2G, R2B)
+                    #     if any([R2B > 1, R2G > 1]):
+                    #         if True:
+                    #             f, a = plt.subplots(1, 2, sharex=True, sharey=True)
+                    #             a[0].imshow(img.astype(np.uint8))
+                    #             a[1].imshow(ref)
+                    #             f.suptitle('R2G={:.3f}  | R2B={:.3f}'.format(R2G, R2B))
+                    #             plt.show()
+                    #         continue
                     if os.path.exists(ref_path):
                         if cv2.imread(img_path) is not None and cv2.imread(ref_path) is not None:
                             self.data.append((img_path, ref_path))
@@ -248,12 +271,13 @@ class DualCamDataset(Dataset):
     #         roi1 = calc_roi(ids, ref, to_32=to_32)
     #         if roi1 is None:
 
-    def random_sample_patch(self, im, lbl, do_transpose=True, registration=False, debug=True):
+    def random_sample_patch(self, raw, lbl, do_transpose=True, registration=False, debug=False):
         if self.bi_linear_demosaic:
-            im = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(im, pattern='GRBG')
+            im = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(raw, pattern='GRBG')
             im = np.clip(im, 0, 255)
             y0, y1, x0, x1 = 2, im.shape[0]-2, 2, im.shape[1]-2
         else:
+            im = raw
             y0, y1, x0, x1 = 0, im.shape[0], 0, im.shape[1]
         sy = random.randint(y0, y1 - self.patch_size)
         sy -= sy % 2
@@ -271,10 +295,27 @@ class DualCamDataset(Dataset):
             lbl_p = lbl[sy:sy+self.patch_size, sx:sx+self.patch_size]
 
         if debug:
-            f, a = plt.subplots(1, 2, sharex=True, sharey=True)
-            a[0].imshow(im_p.astype(np.uint8))
-            a[1].imshow(lbl_p)
-            plt.show()
+            r2g = im_p[:, :, 0] / im_p[:, :, 1]
+            r2b = im_p[:, :, 0] / im_p[:, :, 2]
+            r2g_l = lbl_p[:, :, 0] / lbl_p[:, :, 1]
+            r2b_l = lbl_p[:, :, 0] / lbl_p[:, :, 2]
+            R2G = np.mean(cv2.absdiff(r2g, r2g_l))
+            R2B = np.mean(cv2.absdiff(r2b, r2b_l))
+            # print(R2G, R2B)
+            if R2G > 1 or R2B > 1:
+                print(sy, sx)
+                f, a = plt.subplots(2, 2)
+                a[0, 0].imshow(im_p.astype(np.uint8))
+                a[0, 1].imshow(im.astype(np.uint8))
+                a[1, 0].imshow(lbl)
+                a[1, 1].imshow(raw)
+                f.suptitle('R2G={:.3f}  | R2B={:.3f}'.format(R2G, R2B))
+                plt.show()
+                # f, a = plt.subplots(1, 2, sharex=True, sharey=True)
+                # a[0].imshow(im_p.astype(np.uint8))
+                # a[1].imshow(lbl_p)
+                # f.suptitle('R2G={:.3f}  | R2B={:.3f}'.format(R2G, R2B))
+                # plt.show()
         # cv2.imwrite('/home/assaf/data/dual_cam_results/7_july/train_patches_bilinear/sample_{}.png'.format(self.i),
         #             cv2.cvtColor(im_p.astype(np.uint8), cv2.COLOR_RGB2BGR))
         # cv2.imwrite('/home/assaf/data/dual_cam_results/7_july/train_patches_bilinear/reference_{}.png'.format(self.i),
@@ -293,6 +334,7 @@ class DualCamDataset(Dataset):
         # img = cv2.cvtColor(img, cv2.COLOR_BAYER_RG2RGB)
         ref = cv2.cvtColor(cv2.imread(ref_path), cv2.COLOR_BGR2RGB)
         sample, label = self.random_sample_patch(img, ref)
+
         return sample, label
 
     def __len__(self):
@@ -300,7 +342,7 @@ class DualCamDataset(Dataset):
 
     def get_data_loaders(self, batch_size):
         self.prepare_data()
-        train_loaders = [DataLoader(dataset=Subset(self, indices=self.train_idx), pin_memory=True, num_workers=4,
+        train_loaders = [DataLoader(dataset=Subset(self, indices=self.train_idx), pin_memory=True, num_workers=1,
                                     batch_size=batch_size, collate_fn=base_collate_fn, shuffle=True)]
         test_loaders = [DataLoader(dataset=Subset(self, indices=self.test_idx), pin_memory=False, shuffle=False,
                                    batch_size=batch_size, collate_fn=base_collate_fn)]

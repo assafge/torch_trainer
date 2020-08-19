@@ -2,7 +2,7 @@
 
 import argparse
 from TorchTrainer import TorchTrainer
-from time import time
+# from time import time
 from image_utils import pad_2d
 import cv2
 import matplotlib.pyplot as plt
@@ -27,11 +27,10 @@ def crop_center(img,cropy,cropx):
     return img[sy:sy+cropy, sx:sx+cropx]
 
 
-def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str,
-                    demosaic: bool, rotate: bool, bit_depth: int, raw_result: bool, do_crop: bool, gray: bool):
+def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, demosaic: bool, rotate: bool,
+                    bit_depth: int, raw_result: bool, do_crop: bool, gray: bool, fliplr: bool):
     max_bit = (2**bit_depth) - 1
     if demosaic:
-        print('dm')
         # im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
         im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
         # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerBG2RGB).astype(np.float32)
@@ -39,12 +38,13 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str,
         # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerRG2RGB).astype(np.float32)
 
     elif gray:
-        print('gray')
         im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
     else:
         im_raw = cv2.imread(im_path)
         im_raw = cv2.cvtColor(im_raw, cv2.COLOR_BGR2RGB).astype(np.float32)
-    print(im_raw.ndim)
+
+    if fliplr:
+        im_raw = np.fliplr(im_raw)
 
     if factors is not None:
         im_raw = im_raw * factors
@@ -79,7 +79,7 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str,
         out_np = out.cpu().numpy()
         if out_np.ndim > 2:
             out_np = np.squeeze(out_np, axis=0)
-            out_np = out_np.transpose(1, 2, 0)
+            out_np = out_np.transpose((1, 2, 0))
         out_im = np.clip(out_np, 0, 1)
         out_im = (out_im * 255).astype(np.uint8)
     else:
@@ -91,8 +91,10 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str,
     # remove the padding
     if not do_crop:
         if out_im.shape[:2] != org_shape[:2]:
-            print('cropping')
             out_im = crop_center(out_im, org_shape[0], org_shape[1])
+    if fliplr:
+        out_im = np.fliplr(out_im)
+        return_img = np.fliplr(return_img)
     return out_im, return_img
 
 
@@ -107,9 +109,9 @@ def inference_random_patch(trainer, num_images):
         out = trainer.model(inputs)
         out_np = out.cpu().numpy()
         out_im = np.squeeze(out_np, axis=0)
-        out_im = out_im.transpose(1, 2, 0)
+        out_im = out_im.transpose((1, 2, 0))
         out_im = np.clip(out_im, 0, 1)
-        fig, axes = plt.subplots(nrows=1, ncols=3, sharex=True, sharey=True)
+        fig, axes = plt.subplots(nrows=1, ncols=3, sharex='true', sharey='true')
         axes[0].imshow(img.transpose(1, 2, 0)), axes[0].set_title('in')
         axes[1].imshow(lbl.transpose(1, 2, 0)), axes[1].set_title('lbl')
         axes[2].imshow(out_im), axes[2].set_title('out')
@@ -129,7 +131,8 @@ def save_image_type(img: np.ndarray, in_im_path: str, out_dir: str, mat_out: boo
         out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         cv2.imwrite(out_path, out_im)
 
-def save_image(img: np.ndarray, in_im_path: str, model_name: str, out_dir: str, mat_out: bool):
+def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: str, model_name: str, out_dir: str,
+               mat_out: bool, do_crop: bool):
     out_name = os.path.basename(in_im_path)
     out_name = out_name.split('.')[0] + '_' + model_name
     out_name += '.mat' if mat_out else '.png'
@@ -141,27 +144,33 @@ def save_image(img: np.ndarray, in_im_path: str, model_name: str, out_dir: str, 
     else:
         out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         cv2.imwrite(out_path, out_im)
+    if do_crop:
+        if in_img.ndim > 2:
+            in_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(in_im_path.replace('.png', '_bilinear-demosaic_crop.png'), in_img)
+        cv2.imwrite(in_im_path.replace('.png', '_crop.png'), in_img)
 
 
 def display_result(GT_path, trainer, out_im, in_img, rot90):
     if rot90:
         out_im = np.rot90(out_im)
         in_img = np.rot90(in_img)
-    if out_im.ndim == 2:
-        cmap = 'jet'
-    else:
-        cmap = 'gray'
+
     if GT_path:
         gt = trainer.dataset.depth_read(GT_path)
         if rot90:
             gt = np.rot90(gt)
-        rows = 3
+        cols = 3
     else:
-        rows = 2
-    fig, axes = plt.subplots(nrows=1, ncols=rows, sharex=True, sharey=True)
+        cols = 2
+    fig, axes = plt.subplots(nrows=1, ncols=cols, sharex=True, sharey=True)
     axes[0].imshow(in_img), axes[0].set_title('in')
-    axes[1].imshow(out_im, cmap=cmap), axes[1].set_title('out')
-    if rows == 3:
+    if out_im.ndim == 2:
+        axes[1].imshow(out_im, cmap='jet')
+    else:
+        axes[1].imshow(out_im)
+    axes[1].set_title('out')
+    if cols == 3:
         axes[2].imshow(gt, cmap='jet'), axes[2].set_title('GT')
     plt.show()
 
@@ -169,7 +178,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='PyTorch training module',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('model_path', help='path to pre-trained model')
-    parser.add_argument('-i', '--images_path', nargs='+')
+    parser.add_argument('-i', '--images_path', nargs='+', help='list of image or folder or txt file')
     parser.add_argument('-o', '--out_type', default=None, help='write the image in sub directory of the input image')
     parser.add_argument('-w', '--out_path', default=None, help='path to output file')
     parser.add_argument('-f', '--factors', nargs='+', type=float)
@@ -182,6 +191,8 @@ def get_args():
                         help='select the number of random images, taken from a data set')
     parser.add_argument('-t', '--rot90', action='store_true', default=False)
     parser.add_argument('-cr', '--do_crop', action='store_true', default=False)
+    parser.add_argument('-lr', '--fliplr', action='store_true', default=False,
+                        help='flip before inference and flip back afterwards - in order to use RGGB pattern on GRBG')
     parser.add_argument('-r', '--mat_out', action='store_true', default=False,
                         help='output the classification results (without argmax)')
     parser.add_argument('-b', '--bit_depth', type=int, default=8, help='input image bit depth')
@@ -199,7 +210,7 @@ def main():
     args = get_args()
 
     print('reading model...')
-    trainer = TorchTrainer.warm_startup(root=args.model_path, gpu_index=args.gpu_index, strict=True)
+    trainer = TorchTrainer.warm_startup(root=args.model_path, gpu_index=args.gpu_index, strict=True, best=True)
     trainer.model.eval()
     with torch.no_grad():
         if args.images_path:
@@ -219,25 +230,30 @@ def main():
                     # given path is a directory
                     glob_patt = os.path.join(in_path, args.im_pattern)
                     images.extend(glob(glob_patt))
+                elif in_path[-4:] == '.txt':
+                    with open(in_path) as f:
+                        for _ in range(15):
+                            images.append(f.readline().strip())
                 else:
                     images.append(in_path)
-                if len(images) == 0:
-                    print("WARNING - images list is empty, check glob input: {}".format(glob_patt))
-                for i, im_path in enumerate(images):
-                    print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*10), length=20)
-                    out_im, in_img = inference_image(trainer, factors=factors, im_path=im_path,
-                    demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
-                    do_crop=args.do_crop, gray=args.gray)
+            if len(images) == 0:
+                print("WARNING - images list is empty, check glob input: {}".format(glob_patt))
+            for i, im_path in enumerate(images):
+                print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*20), length=20)
+                out_im, in_img = inference_image(trainer, factors=factors, im_path=im_path,
+                demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
+                do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr)
 
-                    if args.out_type is not None:
-                        out_dir = os.path.join(in_path, args.out_type, model_name)
-                        save_image_type(out_im, im_path, out_dir=out_dir, mat_out=args.mat_out)
-                    elif args.out_path is not None:
-                        save_image(out_im, im_path, model_name, args.out_path, mat_out=args.mat_out)
-                        save_image(in_img, im_path, 'org', args.out_path, mat_out=args.mat_out)
-                    else:
-                        display_result(GT_path=args.GT, trainer=trainer, out_im=out_im, in_img=in_img,rot90=args.rot90)
-                print_progress(len(images), total=len(images), suffix='inferenced {} images {}'.format(len(images), ' ' * 80), length=20)
+                if args.out_type is not None:
+                    out_dir = os.path.join(in_path, args.out_type, model_name)
+                    save_image_type(out_im, im_path, out_dir=out_dir, mat_out=args.mat_out)
+                elif args.out_path is not None:
+                    save_image(out_im, in_img, im_path, model_name, args.out_path,
+                               mat_out=args.mat_out, do_crop=args.do_crop)
+                    # save_image(in_img, im_path, 'org', args.out_path, mat_out=args.mat_out)
+                else:
+                    display_result(GT_path=args.GT, trainer=trainer, out_im=out_im, in_img=in_img,rot90=args.rot90)
+            print_progress(len(images), total=len(images), suffix='inferenced {} images {}'.format(len(images), ' ' * 80), length=20)
 
         elif args.random_images:
             inference_random_patch(trainer, args.random_images)

@@ -122,14 +122,14 @@ class TorchTrainer:
         return cls
 
     @classmethod
-    def warm_startup(cls, root, gpu_index, strict, logger=None):
+    def warm_startup(cls, root, gpu_index, strict, best=False, logger=None):
         config_dict = read_yaml(os.path.join(root, 'cfg.yaml'))
         for cfg_section, cfg_dict in config_dict.items():
             config_dict[cfg_section] = ConfigurationStruct(cfg_dict)
         config = ConfigurationStruct(config_dict)
         cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index, logger=logger)
         cls.init_nn()
-        cls.load_checkpoint(strict)
+        cls.load_checkpoint(strict, best=best)
         return cls
 
     def init_nn(self):
@@ -140,12 +140,16 @@ class TorchTrainer:
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
-    def load_checkpoint(self, strict):
+    def load_checkpoint(self, strict, best=False):
         latest = None
         epoch = -1
-        cp_path = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth')
-        if not os.path.exists(cp_path):
+        if best:
             cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
+        else:
+            cp_path = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth')
+            if not os.path.exists(cp_path):
+                cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
+        print('loading checkpoint', cp_path)
         checkpoint = torch.load(cp_path, map_location=self.device)
         self.epoch = checkpoint['epoch']
         self.model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
