@@ -1,3 +1,5 @@
+__author__ = "Assaf Genosar"
+
 import re
 import os.path
 import random
@@ -8,6 +10,7 @@ from collections import defaultdict
 from glob import glob
 from torch.utils.data import Dataset, DataLoader, Subset
 import sys
+
 sys.path.append('../')
 from image_utils import random_dual_augmentation, coll_fn_rand_rot90_float, random_crop, base_collate_fn
 # from skimage.io import imsave
@@ -21,11 +24,6 @@ import pickle
 import colour_demosaicing
 
 
-__author__ = "Assaf Genosar"
-
-
-
-
 def file_name_order(path):
     fname = os.path.basename(path)
     idx = fname.split('.')[0]
@@ -34,12 +32,12 @@ def file_name_order(path):
     else:
         return idx
 
-def list_images(folder_path: str, pattern = '') -> List[str]:
+
+def list_images(folder_path: str, pattern='') -> List[str]:
     """return a sorted list of png files"""
-    files_list = glob(os.path.join(folder_path, '*'+pattern+'*'))
+    files_list = glob(os.path.join(folder_path, '*' + pattern + '*'))
     files_list.sort(key=file_name_order)
     return files_list
-
 
 
 def calc_bounding_rect(img1, img2, do_plot=False, min_match_count=10, ratio_thresh=0.7, ransac_th=5.0):
@@ -71,9 +69,10 @@ def calc_bounding_rect(img1, img2, do_plot=False, min_match_count=10, ratio_thre
             debug_img = img2.copy()
             debug_img = cv2.polylines(debug_img, [np.int32(bounding_pts)], True, 255, 3, cv2.LINE_AA)
             debug_img = cv2.drawMatches(img1, kp1, debug_img, kp2, good_matches, None, matchColor=(0, 255, 0),
-                                  singlePointColor=None, matchesMask=matches_mask, flags=2)
+                                        singlePointColor=None, matchesMask=matches_mask, flags=2)
             plt.imshow(debug_img), plt.show()
         return transform, bounding_pts.astype(np.int).squeeze(1)
+
 
 def crop_roi(org_path, img_path, ref_path, border=5):
     org = cv2.imread(org_path, cv2.IMREAD_GRAYSCALE)
@@ -95,6 +94,7 @@ def crop_roi(org_path, img_path, ref_path, border=5):
         return None
     return y0, x0, y1, x1
 
+
 def split_to_patches(img_roi, ref_roi, patch_size):
     """returns pairs of (img, ref) patches"""
     h, w = img_roi.shape[:2]
@@ -102,8 +102,8 @@ def split_to_patches(img_roi, ref_roi, patch_size):
     start_x = (w % patch_size) // 2
     # can be randomized
     patches = []
-    for i in range((h//patch_size)-1):
-        for j in range((w//patch_size)-1):
+    for i in range((h // patch_size) - 1):
+        for j in range((w // patch_size) - 1):
             y0 = start_y + i * patch_size
             x0 = start_x + j * patch_size
             y1 = start_y + ((i + 1) * patch_size)
@@ -125,20 +125,24 @@ def shift_calc(clip: np.ndarray, template: np.ndarray, debug: bool):
                                                                                    result_shape, min_loc, shift))
     return shift
 
+
 @dataclass
 class DatasetParams:
     """stores dataset parameters and validate input"""
     org_dir: str
     img_dir: str
-    ref_suffix: str   # jai
-    img_suffix: str   # ids
+    ref_suffix: str  # jai
+    img_suffix: str  # ids
     # align_img: str
     # align_ref: str
     prepared: str = ''
 
+
 class DualCamDataset(Dataset):
     """ Texture data format dataset """
-    def __init__(self, data_sets: dict, patch_size: int, bi_linear_demosaic: bool, seed=42, shuffle=True, train_split=0.8):
+
+    def __init__(self, data_sets: dict, patch_size: int, bi_linear_demosaic: bool, seed=42, shuffle=True,
+                 train_split=0.8):
         """
         Parameters
         ----------
@@ -161,7 +165,7 @@ class DualCamDataset(Dataset):
         for set_name, prm in data_sets.items():
             self.data_sets[set_name] = DatasetParams(**prm)
         self.data_map = {}
-        self.data: List = []   # list of patches
+        self.data: List = []  # list of patches
         self.train_split = train_split
         self.train_idx: np.ndarray = None
         self.test_idx: np.ndarray = None
@@ -172,7 +176,6 @@ class DualCamDataset(Dataset):
         self.patch_size = patch_size
         self.i = 0
         self.colors = {}
-
 
     def prepare_data(self):
         last_idx = 0
@@ -275,7 +278,7 @@ class DualCamDataset(Dataset):
         if self.bi_linear_demosaic:
             im = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(raw, pattern='GRBG')
             im = np.clip(im, 0, 255)
-            y0, y1, x0, x1 = 2, im.shape[0]-2, 2, im.shape[1]-2
+            y0, y1, x0, x1 = 2, im.shape[0] - 2, 2, im.shape[1] - 2
         else:
             im = raw
             y0, y1, x0, x1 = 0, im.shape[0], 0, im.shape[1]
@@ -284,15 +287,15 @@ class DualCamDataset(Dataset):
         sx = random.randint(x0, x1 - self.patch_size)
         sx -= sx % 2
 
-        im_p = im[sy:sy+self.patch_size, sx:sx+self.patch_size]
-        lbl_p = lbl[sy:sy+self.patch_size, sx:sx+self.patch_size]
+        im_p = im[sy:sy + self.patch_size, sx:sx + self.patch_size]
+        lbl_p = lbl[sy:sy + self.patch_size, sx:sx + self.patch_size]
 
-        if registration:  #reg
-            lbl_reg = lbl[sy-5:5+sy+self.patch_size, sx-5:5+sx+self.patch_size]
+        if registration:  # reg
+            lbl_reg = lbl[sy - 5:5 + sy + self.patch_size, sx - 5:5 + sx + self.patch_size]
             shift = shift_calc(im_p[:-1, :-1], lbl_reg, False)
             sx -= shift[0]
             sy -= shift[1]
-            lbl_p = lbl[sy:sy+self.patch_size, sx:sx+self.patch_size]
+            lbl_p = lbl[sy:sy + self.patch_size, sx:sx + self.patch_size]
 
         if debug:
             r2g = im_p[:, :, 0] / im_p[:, :, 1]
@@ -347,5 +350,3 @@ class DualCamDataset(Dataset):
         test_loaders = [DataLoader(dataset=Subset(self, indices=self.test_idx), pin_memory=False, shuffle=False,
                                    batch_size=batch_size, collate_fn=base_collate_fn)]
         return train_loaders, test_loaders
-
-

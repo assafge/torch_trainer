@@ -1,5 +1,3 @@
-#! /home/assaf/EDOF/venv/bin/python
-
 import argparse
 from TorchTrainer import TorchTrainer
 # from time import time
@@ -11,8 +9,8 @@ import torch
 import os.path
 import sys
 from glob import glob
-sys.path.append('../ISP')
-import tabel_detect
+# sys.path.append('../ISP')
+# import tabel_detect
 import scipy.io as sio
 from general_utils import print_progress
 # plt.switch_backend('tkagg')
@@ -28,7 +26,7 @@ def crop_center(img,cropy,cropx):
 
 
 def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, demosaic: bool, rotate: bool,
-                    bit_depth: int, raw_result: bool, do_crop: bool, gray: bool, fliplr: bool):
+                    bit_depth: int, raw_result: bool, do_crop: bool, gray: bool, fliplr: bool, boost: bool):
     max_bit = (2**bit_depth) - 1
     if demosaic:
         # im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
@@ -49,6 +47,10 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, de
     if factors is not None:
         im_raw = im_raw * factors
 
+    if boost:
+        p = np.percentile(im_raw, 98)
+        # print('p', p)
+        im_raw = im_raw.astype(np.float) * (max_bit/p)
     in_img = np.clip(im_raw, 0, max_bit) / max_bit
     if rotate:
         in_img = np.rot90(in_img)
@@ -148,7 +150,8 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: str, model_name:
         if in_img.ndim > 2:
             in_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
             cv2.imwrite(in_im_path.replace('.png', '_bilinear-demosaic_crop.png'), in_img)
-        cv2.imwrite(in_im_path.replace('.png', '_crop.png'), in_img)
+        if not os.path.exists(in_im_path.replace('.png', '_crop.png')):
+            cv2.imwrite(in_im_path.replace('.png', '_crop.png'), in_img)
 
 
 def display_result(GT_path, trainer, out_im, in_img, rot90):
@@ -166,13 +169,14 @@ def display_result(GT_path, trainer, out_im, in_img, rot90):
     fig, axes = plt.subplots(nrows=1, ncols=cols, sharex=True, sharey=True)
     axes[0].imshow(in_img), axes[0].set_title('in')
     if out_im.ndim == 2:
-        axes[1].imshow(out_im, cmap='jet')
+        axes[1].imshow(out_im, cmap='jet', interpolation=None)
     else:
         axes[1].imshow(out_im)
     axes[1].set_title('out')
     if cols == 3:
         axes[2].imshow(gt, cmap='jet'), axes[2].set_title('GT')
     plt.show()
+
 
 def get_args():
     parser = argparse.ArgumentParser(description='PyTorch training module',
@@ -197,6 +201,7 @@ def get_args():
                         help='output the classification results (without argmax)')
     parser.add_argument('-b', '--bit_depth', type=int, default=8, help='input image bit depth')
     parser.add_argument('-m', '--im_pattern', default='*mask*', help='images regex pattern')
+    parser.add_argument('-s', '--boost_image', action='store_true', help='auto gain per image')
     # parser.add_argument('--check_patt', default='*mask.tif', help='input image file pattern')
     args = parser.parse_args()
     assert not (args.mat_out and not (args.mat_out ^ (args.out_type is None))), 'out path is required for mat'
@@ -214,11 +219,11 @@ def main():
     trainer.model.eval()
     with torch.no_grad():
         if args.images_path:
-            if args.ref_checker:
-                ref = cv2.imread(args.ref_checker)
-                factors = tabel_detect.calc_factors(ref / ((2 ** args.bit_depth) - 1))
-                print('INFO - factors:', factors)
-            elif args.factors:
+            # if args.ref_checker:
+            #     ref = cv2.imread(args.ref_checker)
+                # factors = tabel_detect.calc_factors(ref / ((2 ** args.bit_depth) - 1))
+                # print('INFO - factors:', factors)
+            if args.factors:
                 factors = np.array(args.factors)
             else:
                 factors = None
@@ -236,13 +241,12 @@ def main():
                             images.append(f.readline().strip())
                 else:
                     images.append(in_path)
-            if len(images) == 0:
-                print("WARNING - images list is empty, check glob input: {}".format(glob_patt))
+            assert len(images) > 0, 'WARNING - images list is empty, check glob input: {}'.format(glob_patt)
             for i, im_path in enumerate(images):
                 print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*20), length=20)
                 out_im, in_img = inference_image(trainer, factors=factors, im_path=im_path,
                 demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
-                do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr)
+                do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image)
 
                 if args.out_type is not None:
                     out_dir = os.path.join(in_path, args.out_type, model_name)

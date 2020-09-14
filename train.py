@@ -1,4 +1,3 @@
-#! /home/assaf/EDOF/venv/bin/python
 
 import argparse
 from TorchTrainer import TorchTrainer

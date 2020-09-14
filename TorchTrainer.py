@@ -1,4 +1,3 @@
-#! /home/assaf/EDOF/venv/bin/python
 
 import torch
 from general_utils import read_yaml, get_class, print_progress
