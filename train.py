@@ -33,17 +33,6 @@ def main():
     else:
         trainer = TorchTrainer.new_train(out_path=args.out_path, model_cfg=args.model_cfg, optimizer_cfg=args.optimizer_cfg,
                                          dataset_cfg=args.dataset_cfg, gpu_index=args.gpu_index, exp_name=args.exp_name)
-    # if not args.inference_img:
-    #     print('training is about to start, in order to stop => type "stop" + ↵')
-    #     process = Thread(target=trainer.train)
-    #     process.start()
-    #     while process.is_alive() and trainer.running:
-    #         if 'stop' in input():
-    #             trainer.running = False
-    #             print('stopping...')
-    #     process.join()
-    #     print()
-
     trainer.train()
 
 

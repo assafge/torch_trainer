@@ -2,13 +2,14 @@ path: ./models/Unet-milesial.py
 type: UNet
 batch_size: 16
 epochs: 600
+in_channels: &in_ch 3
+out_channels: &out_c 3
 kargs:
-    n_channels: 1
+    n_channels: *in_ch
 #    n_classes: 16
-    n_classes: 3
+    n_classes: *out_c
     scale_channels: 64
 #    scale_channels: 32
-    bilinear: True
 #loss: CrossEntropyLoss # SmoothL1Loss
 loss: MS_SSIM_Loss
 #loss: SmoothL1Loss

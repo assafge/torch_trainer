@@ -172,3 +172,11 @@ def myplot(im, ref):
     ax1.imshow(np.transpose(im, (1, 2, 0)))
     ax2.imshow(ref)
     plt.show()
+
+
+def num_of_channels(image: np.ndarray):
+    """returns the number of channels in image"""
+    if image.ndim == 2:
+        return 1
+    else:
+        return image.shape[2]

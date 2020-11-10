@@ -20,13 +20,26 @@ import colour_demosaicing
 
 def crop_center(img,cropy,cropx):
     y, x = img.shape[:2]
-    sx = x//2-(cropx//2) + cropx % 2
-    sy = y//2-(cropy//2) + cropy % 2
+    sx = x//2-(cropx//2)
+    sx -= sx % 2
+    sy = y//2-(cropy//2)
+    sy -= sy % 2
     return img[sy:sy+cropy, sx:sx+cropx]
 
 
+def run_model(trainer, in_img):
+    inputs = torch.from_numpy(in_img).float().to(trainer.device)
+    inputs = inputs.unsqueeze(0)
+    if inputs.ndim < 4:
+        inputs = inputs.unsqueeze(0)
+
+    out = trainer.model(inputs)
+    return out
+
+
 def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, demosaic: bool, rotate: bool,
-                    bit_depth: int, raw_result: bool, do_crop: bool, gray: bool, fliplr: bool, boost: bool):
+                    bit_depth: int, raw_result: bool, do_crop: bool, gray: bool, fliplr: bool, boost: bool,
+                    split_inference: bool = False):
     max_bit = (2**bit_depth) - 1
     if demosaic:
         # im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
@@ -60,14 +73,16 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, de
     return_img = (in_img * 255).astype(np.uint8)
     if not do_crop:
         in_img = pad_2d(in_img, 32).astype(np.float32)
-
     if in_img.ndim > 2:
         in_img = np.transpose(in_img, (2, 0, 1))
-    inputs = torch.from_numpy(in_img).float().to(trainer.device)
-    inputs = inputs.unsqueeze(0)
-    if inputs.ndim < 4:
-        inputs = inputs.unsqueeze(0)
-    out = trainer.model(inputs)
+
+    if split_inference:
+        im_shape = np.array(in_img.shape)
+        mid_point = im_shape // 2
+        mid_point = mid_point - (mid_point % 2)
+
+    else:
+        out = run_model(trainer, in_img)
     if raw_result:
         out_im = out.squeeze().cpu().numpy()
         out_im = out_im.transpose(1, 2, 0)
@@ -144,14 +159,17 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: str, model_name:
     if mat_out:
         sio.savemat(out_path, {'dpt': img})
     else:
+
         out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        # out_im = img
         cv2.imwrite(out_path, out_im)
     if do_crop:
-        if in_img.ndim > 2:
+        if in_img.ndim > 2 and\
+                not os.path.exists(in_im_path.replace('.png', '_bilinear-demosaic_crop.png')):
             in_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
             cv2.imwrite(in_im_path.replace('.png', '_bilinear-demosaic_crop.png'), in_img)
-        if not os.path.exists(in_im_path.replace('.png', '_crop.png')):
-            cv2.imwrite(in_im_path.replace('.png', '_crop.png'), in_img)
+        if not os.path.exists(in_im_path.replace('_crop.png', '_center_crop.png')):
+            cv2.imwrite(in_im_path.replace('_crop.png', '_center_crop.png'), in_img)
 
 
 def display_result(GT_path, trainer, out_im, in_img, rot90):
@@ -179,8 +197,7 @@ def display_result(GT_path, trainer, out_im, in_img, rot90):
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description='PyTorch training module',
-                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('model_path', help='path to pre-trained model')
     parser.add_argument('-i', '--images_path', nargs='+', help='list of image or folder or txt file')
     parser.add_argument('-o', '--out_type', default=None, help='write the image in sub directory of the input image')
@@ -200,7 +217,7 @@ def get_args():
     parser.add_argument('-r', '--mat_out', action='store_true', default=False,
                         help='output the classification results (without argmax)')
     parser.add_argument('-b', '--bit_depth', type=int, default=8, help='input image bit depth')
-    parser.add_argument('-m', '--im_pattern', default='*mask*', help='images regex pattern')
+    parser.add_argument('-m', '--im_pattern', default='*ids_crop.png', help='images regex pattern')
     parser.add_argument('-s', '--boost_image', action='store_true', help='auto gain per image')
     # parser.add_argument('--check_patt', default='*mask.tif', help='input image file pattern')
     args = parser.parse_args()

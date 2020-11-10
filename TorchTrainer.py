@@ -9,6 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from traces import Trace
 from typing import List
 import yaml
+from tqdm import tqdm, trange
 
 # debug
 import numpy as np
@@ -39,7 +40,6 @@ class UtilityObj:
         self.name = os.path.basename(writer_path)
         self.pname = self.name + (' ' * (7 - len(self.name)))
         self.traces: List[Trace] = []
-        self.stime = time()
 
         if measurements:
             for meas in measurements.values():
@@ -49,36 +49,27 @@ class UtilityObj:
     def step(self, loss, inputs, pred, labels, epoch):
         for m in self.traces:
             m.add_measurement(inputs, pred, labels)
-        print_progress(iteration=self.index, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
-                       suffix=' running loss=%0.3f' % loss if loss > 0.1 else ' running loss=%0.3e' % loss)
         self.aggregated_loss += loss
         self.index += 1
 
     def epoch_step(self, epoch):
         for m in self.traces:
             m.write_epoch(epoch)
-        loop_time = time() - self.stime
         avr = self.aggregated_loss / self.size
-        print_progress(iteration=self.size, total=self.size, prefix='Epoch {} {}'.format(epoch, self.pname), length=40,
-                       suffix='average loss=%.3f, loop time=%.2f' % (avr, loop_time) if avr > 0.1
-                       else 'average loss=%.3e, loop time=%.2f' % (avr, loop_time))
         self.writer.add_scalar('Loss', avr, global_step=epoch)
 
     def init_loop(self):
         self.aggregated_loss = 0
         self.index = 0
-        self.stime = time()
 
     @property
     def size(self):
         return sum([len(loader) for loader in self.loaders])
 
 
-
 class TorchTrainer:
     """wrapper class for torch models training"""
-    def __init__(self, cfg: ConfigurationStruct, root, gpu_index: int, logger):
-        self.logger = logger
+    def __init__(self, cfg: ConfigurationStruct, root, gpu_index: int):
         self.cfg = cfg
         if int(gpu_index) >= 0 and torch.cuda.is_available():
             self.device = torch.device("cuda:" + str(gpu_index))
@@ -88,13 +79,13 @@ class TorchTrainer:
             print('using cpu')
         self.model: torch.nn.Module = None
         self.optimizer = None
-        self.epoch: int = 0
+        self.start_epoch: int = 0
         self.root = root
         self.dataset = None
         self.running = True
 
     @classmethod
-    def new_train(cls, out_path, model_cfg, optimizer_cfg, dataset_cfg, gpu_index, exp_name, logger=None):
+    def new_train(cls, out_path, model_cfg, optimizer_cfg, dataset_cfg, gpu_index, exp_name):
         sections = {'model': read_yaml(model_cfg),
                     'optimizer': read_yaml(optimizer_cfg),
                     'data': read_yaml(dataset_cfg)}
@@ -115,7 +106,7 @@ class TorchTrainer:
         os.makedirs(os.path.join(root, 'checkpoints'))
         with open(os.path.join(root, 'cfg.yaml'), 'w') as f:
             yaml.dump(data=sections, stream=f)
-        cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index, logger=logger)
+        cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index)
         cls.init_nn()
         cls.model.to(cls.device)
         return cls
@@ -135,13 +126,11 @@ class TorchTrainer:
         model_cls = get_class(self.cfg.model.type, file_path=self.cfg.model.path)
         self.model = model_cls(**self.cfg.model.kargs)
         dataset_cls = get_class(self.cfg.data.type, file_path=self.cfg.data.path)
-        self.dataset = dataset_cls(**self.cfg.data.kargs)
+        self.dataset = dataset_cls(self.root, self.cfg.model.in_channels, self.cfg.model.out_channels, **self.cfg.data.kargs)
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
     def load_checkpoint(self, strict, best=False):
-        latest = None
-        epoch = -1
         if best:
             cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
         else:
@@ -150,7 +139,7 @@ class TorchTrainer:
                 cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
         print('loading checkpoint', cp_path)
         checkpoint = torch.load(cp_path, map_location=self.device)
-        self.epoch = checkpoint['epoch']
+        self.start_epoch = checkpoint['epoch']
         self.model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
         if not strict:
             print('non strict', self.model.fine_tune_)
@@ -166,12 +155,12 @@ class TorchTrainer:
                         state[k] = v.to(self.device)
         self.model.to(self.device)
 
-    def save_checkpoint(self, better):
+    def save_checkpoint(self, better, epoch):
         if better:
-            fpath = os.path.join(self.root, 'checkpoints', 'checkpoint.pth'.format(self.epoch))
+            fpath = os.path.join(self.root, 'checkpoints', 'checkpoint.pth'.format(self.start_epoch))
         else:
-            fpath = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth'.format(self.epoch))
-        torch.save({'epoch': self.epoch,
+            fpath = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth'.format(self.start_epoch))
+        torch.save({'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
         # if self.epoch % 50 == 0:
@@ -203,54 +192,43 @@ class TorchTrainer:
         best_loss = 2 ** 16
         self.running = True
 
-        train.init_loop()
-        while self.epoch <= self.cfg.model.epochs and self.running:
-            self.model.train()
+        self.model.train()
+        ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=100)
+        for epoch in ep_prog:
+            train.init_loop()
             for train_loader in train.loaders:
-                if not self.running:
-                    break
-                train.init_loop()
-                tt = time()
-                for x, y in train_loader:
+                prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
+                for x, y in prog:
+                # for x, y in train_loader:
                     inputs, labels = x.to(self.device), y.to(self.device)
                     outputs = self.model(inputs)
                     self.optimizer.zero_grad()
                     loss = criterion(outputs, labels)
                     loss.backward()
                     self.optimizer.step()
-                    train.step(loss.item(), inputs, outputs, labels, self.epoch)
-            train.epoch_step(self.epoch)
+                    train.step(loss.item(), inputs, outputs, labels, epoch)
+                    prog.set_description(f'train loss {loss.item():.2}')
+            train.epoch_step(epoch)
 
-            if self.epoch % 3 == 0 and self.running:
+            if epoch % 3 == 0:
                 self.model.eval()
                 test.init_loop()
-                for test_loader in test.loaders:
-                    for x, y in test_loader:
-                        inputs, labels = x.to(self.device), y.to(self.device)
-                        with torch.no_grad():
+                with torch.no_grad():
+                    for test_loader in test.loaders:
+                        prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
+                        for x, y in prog:
+                        # for x, y in test_loader:
+                            inputs, labels = x.to(self.device), y.to(self.device)
                             outputs = self.model(inputs)
                             loss = criterion(outputs, labels)
-                            test.step(loss.item(), inputs, outputs, labels, self.epoch)
+                            test.step(loss.item(), inputs, outputs, labels, self.start_epoch)
+                            prog.set_description(f'validation loss {loss.item():.2}')
                 # self.save_to_debug(inputs, outputs, labels)
-                test.epoch_step(self.epoch)
-
-            if test.aggregated_loss < best_loss:
-                best_loss = test.aggregated_loss
-                self.save_checkpoint(True)
-            else:
-                self.save_checkpoint(False)
-            # self.save_checkpoint(test.loss < best_loss)
-
-            self.epoch += 1
-        #
-        # if not self.running:
-        #     self.epoch -= 1
-        #     self.save_checkpoint(False)
-        # else:
-
-
-        self.running = False
-
+                test.epoch_step(epoch)
+                if test.aggregated_loss < best_loss:
+                    best_loss = test.aggregated_loss
+                if epoch > self.cfg.model.epochs / 4:
+                    self.save_checkpoint(best_loss == test.aggregated_loss, epoch)
 
     def save_to_debug(self, inputs, outputs, labels):
         out_path = '/tmp/minibatch_debug'
