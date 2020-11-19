@@ -6,7 +6,7 @@ import os.path
 import numpy as np
 from glob import glob
 from torch.utils.data import DataLoader, Subset
-from typing import List, Dict
+from typing import List
 from dataclasses import dataclass
 import cv2
 import matplotlib.pyplot as plt
@@ -120,23 +120,21 @@ def shift_calc(clip: np.ndarray, template: np.ndarray, debug: bool):
 @dataclass
 class DualCamParams:
     """stores dataset parameters and validate input"""
-    org_dir: str
+    ref_dir: str
     img_dir: str
     ref_suffix: str  # jai
     img_suffix: str  # ids
-    mix_inputs: bool = False
-    prepared: str = ''
+    sub_exposure: str = None
+    prepared: str = None
 
 
 class DualCamDataset(BaseDataset):
     """ dual cameras dataset """
 
     def __init__(self, root_dir: str, in_channels: int, out_channels: int, train_split: float,
-                 data_sets: dict, patch_size: int, seed=42,):
-        super().__init__(root_dir, in_channels, out_channels, train_split)
-        self.data_sets: Dict[str, DualCamParams] = {}
-        for set_name, prm in data_sets.items():
-            self.data_sets[set_name] = DualCamParams(**prm)
+                 data_sets, patch_size: int, seed=42,):
+        super().__init__(root_dir, in_channels, out_channels, train_split, data_sets, DualCamParams)
+
         self.data_map = {}
         self.data: List = []  # list of patches
         self.train_idx: np.ndarray = None
@@ -154,10 +152,15 @@ class DualCamDataset(BaseDataset):
                     self.data = pickle.load(f)
             else:
                 for img_path in list_images(prm.img_dir, prm.img_suffix):
-                    ref_name = os.path.basename(img_path.replace(prm.img_suffix, prm.ref_suffix))
-                    ref_path = os.path.join(os.path.dirname(os.path.dirname(img_path)), ref_name)
+                    img_name = os.path.basename(img_path)
+                    ref_name = img_name.replace(prm.img_suffix, prm.ref_suffix)
+                    ref_path = os.path.join(prm.ref_dir, ref_name)
                     if os.path.exists(ref_path):
-                        self.data.append((img_path, ref_path))
+                        self.data.append([ref_path, img_path])
+                        if prm.sub_exposure is not None:
+                            img_dir_name = os.path.dirname(img_path)
+                            patt = os.path.join(img_dir_name, prm.sub_exposure, img_name)
+                            self.data[-1].extend(glob(patt))
             print('added {} images from {} dataset'.format(len(self.data) - last_idx, dataset_name))
             last_idx = len(self.data)
         assert len(self.data) > 0, 'dataset is empty'
@@ -181,15 +184,15 @@ class DualCamDataset(BaseDataset):
             im = np.clip(im, 0, 255)
             # in bilinear demosaicing the edges are noisy
             y0, y1, x0, x1 = 2, im.shape[0] - 2, 2, im.shape[1] - 2
+            sy = random.randint(y0, y1 - self.patch_size)
+            sx = random.randint(x0, x1 - self.patch_size)
+            sy -= sy % 2
+            sx -= sx % 2
         else:
             im = raw
             y0, y1, x0, x1 = 0, im.shape[0], 0, im.shape[1]
-        sy = random.randint(y0, y1 - self.patch_size)
-        sx = random.randint(x0, x1 - self.patch_size)
-        if im is raw:
-            # keep bayer structure
-            sy -= sy % 2
-            sx -= sx % 2
+            sy = random.randint(y0, y1 - self.patch_size)
+            sx = random.randint(x0, x1 - self.patch_size)
 
         im_p = im[sy:sy + self.patch_size, sx:sx + self.patch_size]
         lbl_p = lbl[sy:sy + self.patch_size, sx:sx + self.patch_size]
@@ -219,12 +222,18 @@ class DualCamDataset(BaseDataset):
         return im_p.astype(np.float32) / 255, lbl_p.astype(np.float32) / 255
 
     def __getitem__(self, item):
-        img_path, ref_path = self.data[item]
+        if len(self.data[item]) > 2:
+            img_path = random.choice(self.data[item][1:])
+            ref_path = self.data[item][0]
+        else:
+            ref_path, img_path = self.data[item]
         if self.out_channels == 3:
             ref = cv2.cvtColor(cv2.imread(ref_path), cv2.COLOR_BGR2RGB)
         else:
             ref = cv2.imread(ref_path, cv2.IMREAD_GRAYSCALE)
-        img = cv2.imread(ref_path, cv2.IMREAD_UNCHANGED)
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+        if num_of_channels(img) == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         sample, label = self.random_sample_patch(img, ref)
         return sample, label
 

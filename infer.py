@@ -1,7 +1,7 @@
 import argparse
 from TorchTrainer import TorchTrainer
 # from time import time
-from image_utils import pad_2d
+from image_utils import pad_2d, num_of_channels
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,6 +20,8 @@ import colour_demosaicing
 
 def crop_center(img,cropy,cropx):
     y, x = img.shape[:2]
+    cropy, cropx = min(cropy, img.shape[0]), min(cropx, img.shape[1])
+
     sx = x//2-(cropx//2)
     sx -= sx % 2
     sy = y//2-(cropy//2)
@@ -69,7 +71,7 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, de
         in_img = np.rot90(in_img)
     org_shape = in_img.shape[:2]
     if do_crop:
-        in_img = crop_center(in_img, min(2048, in_img.shape[0]), min(2048, in_img.shape[1]))
+        in_img = crop_center(in_img, 2048, 2048)
     return_img = (in_img * 255).astype(np.uint8)
     if not do_crop:
         in_img = pad_2d(in_img, 32).astype(np.float32)
@@ -172,15 +174,21 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: str, model_name:
             cv2.imwrite(in_im_path.replace('_crop.png', '_center_crop.png'), in_img)
 
 
-def display_result(GT_path, trainer, out_im, in_img, rot90):
+def display_result(gt_path, trainer, out_im: np.ndarray, in_img: np.ndarray, rot90, do_crop):
+    print(in_img.shape)
     if rot90:
         out_im = np.rot90(out_im)
         in_img = np.rot90(in_img)
 
-    if GT_path:
-        gt = trainer.dataset.depth_read(GT_path)
+    if gt_path:
+        # gt = trainer.dataset.depth_read(GT_path)
+        gt = cv2.imread(gt_path, cv2.IMREAD_UNCHANGED)
+        if num_of_channels(gt) == 3:
+            gt = cv2.cvtColor(gt, cv2.COLOR_BGR2RGB)
         if rot90:
             gt = np.rot90(gt)
+        if do_crop:
+            gt = crop_center(gt, 2048, 2048)
         cols = 3
     else:
         cols = 2
@@ -273,7 +281,8 @@ def main():
                                mat_out=args.mat_out, do_crop=args.do_crop)
                     # save_image(in_img, im_path, 'org', args.out_path, mat_out=args.mat_out)
                 else:
-                    display_result(GT_path=args.GT, trainer=trainer, out_im=out_im, in_img=in_img,rot90=args.rot90)
+                    display_result(gt_path=args.GT, trainer=trainer, out_im=out_im, in_img=in_img, rot90=args.rot90,
+                                   do_crop=args.do_crop)
             print_progress(len(images), total=len(images), suffix='inferenced {} images {}'.format(len(images), ' ' * 80), length=20)
 
         elif args.random_images:

@@ -49,7 +49,7 @@ class UtilityObj:
     def step(self, loss, inputs, pred, labels, epoch):
         for m in self.traces:
             m.add_measurement(inputs, pred, labels)
-        self.aggregated_loss += loss
+        self.aggregated_loss += sum([l.item() for l in loss])
         self.index += 1
 
     def epoch_step(self, epoch):
@@ -112,12 +112,12 @@ class TorchTrainer:
         return cls
 
     @classmethod
-    def warm_startup(cls, root, gpu_index, strict, best=False, logger=None):
+    def warm_startup(cls, root, gpu_index, strict, best=False):
         config_dict = read_yaml(os.path.join(root, 'cfg.yaml'))
         for cfg_section, cfg_dict in config_dict.items():
             config_dict[cfg_section] = ConfigurationStruct(cfg_dict)
         config = ConfigurationStruct(config_dict)
-        cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index, logger=logger)
+        cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index)
         cls.init_nn()
         cls.load_checkpoint(strict, best=best)
         return cls
@@ -178,20 +178,24 @@ class TorchTrainer:
                           measurements=self.cfg.model.test_traces)
         return train, test
 
-    def train(self):
-        if 'weights' in vars(self.dataset):
-            if self.dataset.weights is not None:
-                self.cfg.model.loss_kargs.update({
-                    'weight': torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)})
-        criterion_cls = get_class(self.cfg.model.loss, module_path=self.cfg.model.loss_module_path if
-                                  'loss_module_path' in vars(self.cfg.model) else 'torch.nn')
-        criterion = criterion_cls(**self.cfg.model.loss_kargs)
+    def init_loss_func(self):
+        criteria = []
+        for loss, loss_cfg in self.cfg.model.loss.items():
+            module_path = loss_cfg['module_path'] if 'module_path' in loss_cfg else 'torch.nn'
+            criterion_cls = get_class(loss, module_path)
+            criteria.append(criterion_cls(**loss_cfg['kargs']))
+        # if 'weights' in vars(self.dataset):
+        #     if self.dataset.weights is not None:
+        #         self.cfg.model.loss_kargs.update({
+        #             'weight': torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)})
+        return criteria
 
+    def train(self):
         self.model.zero_grad()
         train, test = self.init_training_obj()
         best_loss = 2 ** 16
         self.running = True
-
+        criteria = self.init_loss_func()
         self.model.train()
         ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=100)
         for epoch in ep_prog:
@@ -203,10 +207,10 @@ class TorchTrainer:
                     inputs, labels = x.to(self.device), y.to(self.device)
                     outputs = self.model(inputs)
                     self.optimizer.zero_grad()
-                    loss = criterion(outputs, labels)
+                    loss = sum([criterion(outputs, labels) for criterion in criteria])
                     loss.backward()
                     self.optimizer.step()
-                    train.step(loss.item(), inputs, outputs, labels, epoch)
+                    train.step(loss, inputs, outputs, labels, epoch)
                     prog.set_description(f'train loss {loss.item():.2}')
             train.epoch_step(epoch)
 
@@ -230,7 +234,7 @@ class TorchTrainer:
                 if epoch > self.cfg.model.epochs / 4:
                     self.save_checkpoint(best_loss == test.aggregated_loss, epoch)
 
-    def save_to_debug(self, inputs, outputs, labels):
+    def debug_save(self, inputs, outputs, labels):
         out_path = '/tmp/minibatch_debug'
         if not os.path.isdir(out_path):
             os.makedirs(out_path)
