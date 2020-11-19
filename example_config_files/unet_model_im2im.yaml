@@ -11,14 +11,18 @@ kargs:
     scale_channels: 64
 #    scale_channels: 32
 #loss: CrossEntropyLoss # SmoothL1Loss
-loss: MS_SSIM_Loss
-#loss: SmoothL1Loss
-loss_module_path: pytorch_msssim
-loss_kargs:
-    data_range: 1
-    weights: [0.0448, 0.2856, 0.3001]
-#    mix_alpha: 0.84
-    K: [0.01, 0.4]
+loss:
+    MS_SSIM_Loss:
+        module_path: pytorch_msssim
+        kargs:
+            data_range: 1
+            weights: [ 0.0448, 0.2856, 0.3001 ]
+            K: [0.01, 0.4]
+    SmoothL1Loss:
+        kargs:
+            reduction: mean
+            #mix_alpha: 0.84
+
 #    ignore_index: 0
 #    reduction: mean
 
