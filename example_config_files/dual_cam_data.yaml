@@ -1,0 +1,13 @@
+path: ./data_sets/dual_cam.py
+type: DualCamDataset
+kargs:
+    train_split: 0.9
+    patch_size: 256
+    data_sets:
+        22_july:
+            org_dir: /home/assaf/data/Datasets/DIV2K_train_HR
+            img_dir: /home/assaf/data/dual_cam_acquisition/22_july
+            img_suffix: _ids_crop
+            ref_suffix: _jai_wrapped_crop_wb
+            prepared: #/tmp/data.pth #/home/assaf/data/dual_cam_acquisition/16_june_data.pth
+loader_kargs:

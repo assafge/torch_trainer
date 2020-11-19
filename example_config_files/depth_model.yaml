@@ -1,0 +1,25 @@
+path: ./models/edof_models.py
+type: Net
+batch_size: 14
+epochs: 300
+kargs:
+    target_mode: 
+    skip_layer: true
+    mode: segmentation
+loss: CrossEntropyLoss
+loss_kargs:
+    ignore_index: 0
+    reduction: mean
+
+train_traces:
+
+test_traces:
+    pixelwize_accuracy:
+        path: ./traces.py
+        type: PixelWiseAccuracy
+    quazipixelwize_accuracy:
+        path: ./traces.py
+        type: QuaziPixelWiseAccuracy
+    image_trace:
+        path: ./traces.py
+        type: ClassificationImageTrace

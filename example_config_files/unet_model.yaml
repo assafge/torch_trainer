@@ -1,0 +1,27 @@
+path: ./models/Unet-milesial.py
+type: UNet
+batch_size: 8
+epochs: 300
+kargs:
+    n_channels: 3
+    n_classes: 16
+    scale_channels: 64
+    bilinear: True
+loss: CrossEntropyLoss
+loss_kargs:
+    ignore_index: 0
+    reduction: mean
+
+test_traces:
+    pixelwize_accuracy:
+        path: ./traces.py
+        type: PixelWiseAccuracy
+    quazipixelwize_accuracy:
+        path: ./traces.py
+        type: QuaziPixelWiseAccuracy
+    image_trace:
+        path: ./traces.py
+        type: ClassificationImageTrace
+
+train_traces:
+

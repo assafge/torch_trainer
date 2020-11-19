@@ -1,0 +1,21 @@
+path: ./data_sets/texture.py
+type: TextureDataset
+kargs:
+
+    shuffle: True
+    sigma: 13   # 8bit scale
+    seed: 42
+    train_split: 0.95
+    patch_size: 128
+    data_sets:
+        TextureDatset_wImagin:
+            root_dir: /media/yotamg/Assaf/Datasets/TextureDatset_wImaging
+            psi_prefix: psi_
+            gt_prefix: GT
+            gt_suffix: .jpg
+            img_suffix: .tif
+            psi_start: 0
+            psi_end: 8
+            psi_step: 1
+            split_method: even
+loader_kargs:

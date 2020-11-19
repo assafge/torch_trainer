@@ -1,0 +1,4 @@
+type: Adam
+
+kargs:
+  lr: 1e-4
