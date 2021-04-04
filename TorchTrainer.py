@@ -49,7 +49,7 @@ class UtilityObj:
     def step(self, loss, inputs, pred, labels, epoch):
         for m in self.traces:
             m.add_measurement(inputs, pred, labels)
-        self.aggregated_loss += sum([l.item() for l in loss])
+        self.aggregated_loss += loss
         self.index += 1
 
     def epoch_step(self, epoch):
@@ -195,23 +195,26 @@ class TorchTrainer:
         train, test = self.init_training_obj()
         best_loss = 2 ** 16
         self.running = True
-        criteria = self.init_loss_func()
+        # rgb_crit, crit = self.init_loss_func()
+        crit = self.init_loss_func()
         self.model.train()
         ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=100)
         for epoch in ep_prog:
             train.init_loop()
             for train_loader in train.loaders:
-                prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
-                for x, y in prog:
-                # for x, y in train_loader:
+                # prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
+                # for x, y in prog:
+                for x, y in train_loader:
                     inputs, labels = x.to(self.device), y.to(self.device)
                     outputs = self.model(inputs)
                     self.optimizer.zero_grad()
-                    loss = sum([criterion(outputs, labels) for criterion in criteria])
+                    # loss = rgb_crit(outputs[:, :3, :, :], labels[:, :3, :, :]) + crit(outputs, labels)
+                    # loss = crit(outputs, labels)
+                    loss = sum([c(outputs, labels) for c in crit])
                     loss.backward()
                     self.optimizer.step()
                     train.step(loss, inputs, outputs, labels, epoch)
-                    prog.set_description(f'train loss {loss.item():.2}')
+                    # prog.set_description(f'train loss {loss.item():.2}')
             train.epoch_step(epoch)
 
             if epoch % 3 == 0:
@@ -219,14 +222,16 @@ class TorchTrainer:
                 test.init_loop()
                 with torch.no_grad():
                     for test_loader in test.loaders:
-                        prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
-                        for x, y in prog:
-                        # for x, y in test_loader:
+                    #     prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
+                    #     for x, y in prog:
+                        for x, y in test_loader:
                             inputs, labels = x.to(self.device), y.to(self.device)
                             outputs = self.model(inputs)
-                            loss = criterion(outputs, labels)
+                            # loss = rgb_crit(outputs[:, :3, :, :], labels[:, :3, :, :]) + crit(outputs, labels)
+                            # loss = crit(outputs, labels)
+                            loss = sum([c(outputs, labels) for c in crit])
                             test.step(loss.item(), inputs, outputs, labels, self.start_epoch)
-                            prog.set_description(f'validation loss {loss.item():.2}')
+                            # prog.set_description(f'validation loss {loss.item():.2}')
                 # self.save_to_debug(inputs, outputs, labels)
                 test.epoch_step(epoch)
                 if test.aggregated_loss < best_loss:

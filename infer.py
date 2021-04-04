@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import argparse
 from TorchTrainer import TorchTrainer
 # from time import time
@@ -7,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import os.path
-import sys
+from pathlib import Path
 from glob import glob
 # sys.path.append('../ISP')
 # import tabel_detect
@@ -15,7 +16,10 @@ import scipy.io as sio
 from general_utils import print_progress
 # plt.switch_backend('tkagg')
 import colour_demosaicing
-
+import pandas as pd
+from tqdm import tqdm
+from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import mean_squared_error as mse
 
 
 def crop_center(img,cropy,cropx):
@@ -39,9 +43,10 @@ def run_model(trainer, in_img):
     return out
 
 
-def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, demosaic: bool, rotate: bool,
-                    bit_depth: int, raw_result: bool, do_crop: bool, gray: bool, fliplr: bool, boost: bool,
-                    split_inference: bool = False):
+def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = None,
+                    demosaic: bool =False, rotate: bool = False, bit_depth: int = 8,
+                    raw_result: bool = False, do_crop: bool = False, gray: bool = False,
+                    fliplr: bool = False, boost: bool = False, split_inference: bool = False):
     max_bit = (2**bit_depth) - 1
     if demosaic:
         # im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
@@ -89,12 +94,12 @@ def inference_image(trainer: TorchTrainer, factors: np.ndarray, im_path: str, de
         out_im = out.squeeze().cpu().numpy()
         out_im = out_im.transpose(1, 2, 0)
         return out_im, return_img
-    if out.ndim > 3 and out.shape[1] > 3:  # segmentation
+    if out.ndim > 3 and out.shape[1] > 5:  # segmentation
         outs = out.argmax(dim=1).squeeze()
         out_im = outs.cpu().numpy()
         out_im = out_im.astype(np.uint8)
 
-    elif out.shape[1] == 3:  # im2im
+    elif out.ndim > 3:  # im2im
         out_np = out.cpu().numpy()
         if out_np.ndim > 2:
             out_np = np.squeeze(out_np, axis=0)
@@ -192,15 +197,21 @@ def display_result(gt_path, trainer, out_im: np.ndarray, in_img: np.ndarray, rot
         cols = 3
     else:
         cols = 2
+    if out_im.shape[2] == 4:
+        cols += 1
     fig, axes = plt.subplots(nrows=1, ncols=cols, sharex=True, sharey=True)
     axes[0].imshow(in_img), axes[0].set_title('in')
     if out_im.ndim == 2:
         axes[1].imshow(out_im, cmap='jet', interpolation=None)
     else:
-        axes[1].imshow(out_im)
+        axes[1].imshow(out_im[:, :, :3])
     axes[1].set_title('out')
-    if cols == 3:
-        axes[2].imshow(gt, cmap='jet'), axes[2].set_title('GT')
+    if cols >= 3:
+        if gt_path:
+            axes[2].imshow(gt), axes[2].set_title('GT')
+    if out_im.shape[2] == 4:
+        axes[-1].imshow(out_im[:, :, 3], cmap='gray'), axes[-1].set_title('IR')
+
     plt.show()
 
 
@@ -227,14 +238,15 @@ def get_args():
     parser.add_argument('-b', '--bit_depth', type=int, default=8, help='input image bit depth')
     parser.add_argument('-m', '--im_pattern', default='*ids_crop.png', help='images regex pattern')
     parser.add_argument('-s', '--boost_image', action='store_true', help='auto gain per image')
+    parser.add_argument('-ti', '--test_images', action='store_true', help='infer test images')
     # parser.add_argument('--check_patt', default='*mask.tif', help='input image file pattern')
     args = parser.parse_args()
     assert not (args.mat_out and not (args.mat_out ^ (args.out_type is None))), 'out path is required for mat'
-    for in_path in args.images_path:
-        assert os.path.exists(in_path), 'ERROR - path is not exist %s' % in_path
+    if not args.test_images:
+        for in_path in args.images_path:
+            assert os.path.exists(in_path), 'ERROR - path is not exist %s' % in_path
 
     return args
-
 
 def main():
     args = get_args()
@@ -269,7 +281,7 @@ def main():
             assert len(images) > 0, 'WARNING - images list is empty, check glob input: {}'.format(glob_patt)
             for i, im_path in enumerate(images):
                 print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*20), length=20)
-                out_im, in_img = inference_image(trainer, factors=factors, im_path=im_path,
+                out_im, in_img = inference_image(trainer, im_path=im_path, factors=factors,
                 demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
                 do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image)
 
@@ -287,6 +299,33 @@ def main():
 
         elif args.random_images:
             inference_random_patch(trainer, args.random_images)
+        elif args.test_images:
+            model_dir = Path(args.model_path)
+            test_df = pd.read_csv(model_dir.joinpath('test_images.csv'))
+            test_dir = model_dir.joinpath('test_images')
+            test_dir.mkdir(exist_ok=True)
+            mse_rgb_ir = []
+            ssim_rgb_ir = []
+            psnr_rgb_ir = []
+            for _, im_path in tqdm(test_df.iterrows()):
+                out_im, in_img = inference_image(trainer, im_path=im_path.full)
+                ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+                ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
+                mse_rgb_ir.append((mse(ref_rgb, out_im[:, :, :3]), mse(ref_ir, out_im[:, :, 3])))
+                rgb_range = out_im[:, :, :3].max() - out_im[:, :, :3].min()
+                ir_range = out_im[:, :, 3].max() - out_im[:, :, 3].min()
+                ssim_rgb_ir.append((ssim(ref_rgb, out_im[:, :, :3], data_range=rgb_range, multichannel=True),
+                                    ssim(ref_ir, out_im[:, :, 3], data_range=ir_range)))
+                psnr_rgb_ir.append(10 * np.log10((255.0**2) / np.array(mse_rgb_ir[-1])))
+                rgb_out = test_dir.joinpath(Path(im_path.rgb).stem + '_est.png')
+                ir_out = test_dir.joinpath(Path(im_path.ir).stem + '_est.png')
+                cv2.imwrite(str(rgb_out), cv2.cvtColor(out_im[:, :, :3], cv2.COLOR_RGB2BGR))
+                cv2.imwrite(str(ir_out), out_im[:, :, 3])
+            test_df[['mse_rgb', 'mse_ir']] = mse_rgb_ir
+            test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
+            test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir
+            test_df.to_csv(model_dir.joinpath('test_images.csv'), index_label=False, index=False)
+
 
 if __name__ == '__main__':
     main()

@@ -69,8 +69,8 @@ class ImageTrace(Trace):
             w = self.inp.shape[2] * 3
         out = np.zeros((3, h, w), dtype=np.uint8)
         out[:, :, :w//3] = self.inp
-        out[:, :, w//3:2*(w//3)] = self.pred
-        out[:, :, 2*(w//3):] = self.lbl
+        out[:, :, w//3:2*(w//3)] = self.pred[:3, :, :]
+        out[:, :, 2*(w//3):] = self.lbl[:3, :, :]
         self.writer.add_image('input | predicted | label', out, global_step=step, dataformats='CHW')
         self.step = step
 
