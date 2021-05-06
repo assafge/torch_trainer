@@ -2,7 +2,7 @@
 import argparse
 from TorchTrainer import TorchTrainer
 # from time import time
-from image_utils import pad_2d, num_of_channels
+from image_utils import pad_2d, num_of_channels, mosaic_image
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -44,9 +44,9 @@ def run_model(trainer, in_img):
 
 
 def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = None,
-                    demosaic: bool =False, rotate: bool = False, bit_depth: int = 8,
-                    raw_result: bool = False, do_crop: bool = False, gray: bool = False,
-                    fliplr: bool = False, boost: bool = False, split_inference: bool = False):
+                    demosaic: bool =False, rotate: bool = False, bit_depth: int = 8, raw_result: bool = False,
+                    do_crop: bool = False, gray: bool = False, fliplr: bool = False, boost: bool = False,
+                    split_inference: bool = False, do_mosaic: bool = False):
     max_bit = (2**bit_depth) - 1
     if demosaic:
         # im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
@@ -54,13 +54,13 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
         # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerBG2RGB).astype(np.float32)
         im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(im_raw, pattern='GRBG')
         # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerRG2RGB).astype(np.float32)
-
     elif gray:
         im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
     else:
         im_raw = cv2.imread(im_path)
         im_raw = cv2.cvtColor(im_raw, cv2.COLOR_BGR2RGB).astype(np.float32)
-
+    if do_mosaic:
+        im_raw = mosaic_image(im_raw, pattern='rggb')
     if fliplr:
         im_raw = np.fliplr(im_raw)
 
@@ -155,21 +155,27 @@ def save_image_type(img: np.ndarray, in_im_path: str, out_dir: str, mat_out: boo
         out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         cv2.imwrite(out_path, out_im)
 
-def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: str, model_name: str, out_dir: str,
+def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name: str, out_dir: str,
                mat_out: bool, do_crop: bool):
-    out_name = os.path.basename(in_im_path)
-    out_name = out_name.split('.')[0] + '_' + model_name
-    out_name += '.mat' if mat_out else '.png'
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
-    out_path = os.path.join(out_dir, out_name)
+    p = Path(in_im_path)
+    out_path = p.parent.joinpath(p.stem + '_' + model_name)
+    if not p.parent.is_dir():
+        p.parent.mkdir()
     if mat_out:
-        sio.savemat(out_path, {'dpt': img})
+        out_name = out_path.as_posix() + '.mat'
+        sio.savemat(out_name, {'dpt': img})
     else:
+        if img.ndim > 2:
+            if img.shape[2] == 4:
+                bgr_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
+                ir_im = img[:, :, 3]
+                cv2.imwrite(out_path.as_posix() + '_rgb.png', bgr_im)
+                cv2.imwrite(out_path.as_posix() + '_ir.png', ir_im)
 
         out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         # out_im = img
-        cv2.imwrite(out_path, out_im)
+        out_name = out_path.as_posix() + '.png'
+        cv2.imwrite(out_name, out_im)
     if do_crop:
         if in_img.ndim > 2 and\
                 not os.path.exists(in_im_path.replace('.png', '_bilinear-demosaic_crop.png')):
@@ -239,6 +245,8 @@ def get_args():
     parser.add_argument('-m', '--im_pattern', default='*ids_crop.png', help='images regex pattern')
     parser.add_argument('-s', '--boost_image', action='store_true', help='auto gain per image')
     parser.add_argument('-ti', '--test_images', action='store_true', help='infer test images')
+    parser.add_argument('-mo', '--mosaic_images', action='store_true', help='perform mosaicing to input images')
+
     # parser.add_argument('--check_patt', default='*mask.tif', help='input image file pattern')
     args = parser.parse_args()
     assert not (args.mat_out and not (args.mat_out ^ (args.out_type is None))), 'out path is required for mat'
@@ -283,7 +291,7 @@ def main():
                 print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*20), length=20)
                 out_im, in_img = inference_image(trainer, im_path=im_path, factors=factors,
                 demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
-                do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image)
+                do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image, mosaic=args.mosaic_images)
 
                 if args.out_type is not None:
                     out_dir = os.path.join(in_path, args.out_type, model_name)
@@ -308,7 +316,9 @@ def main():
             ssim_rgb_ir = []
             psnr_rgb_ir = []
             for _, im_path in tqdm(test_df.iterrows()):
-                out_im, in_img = inference_image(trainer, im_path=im_path.full)
+                out_im, in_img = inference_image(trainer, im_path=im_path.full,
+                demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
+                do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image, do_mosaic=args.mosaic_images)
                 ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
                 ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
                 mse_rgb_ir.append((mse(ref_rgb, out_im[:, :, :3]), mse(ref_ir, out_im[:, :, 3])))

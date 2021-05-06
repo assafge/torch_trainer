@@ -6,13 +6,19 @@ import torch.nn.functional as F
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, dilated=False):
         super().__init__()
+        if dilated:
+            dilation = 2
+            padding = 3
+        else:
+            dilation = 1
+            padding = 1
         self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, dilation=dilation, padding=padding),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, dilation=dilation, padding=padding),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
@@ -40,8 +46,6 @@ class Up(nn.Module):
 
     def __init__(self, in_channels, out_channels, bilinear=True):
         super().__init__()
-
-        # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         else:
@@ -75,14 +79,19 @@ class OutConv(nn.Module):
 
 # Full assembly of the parts to form the complete network
 class UNet(nn.Module):
+    """
+     dilated_input: use dilated convolution in input layer to match bayer pattern image
+     bilinear: use normal convolutions to reduce the number of channels (up-sampling)
+    """
     def __init__(self, n_channels, n_classes, scale_channels=64, bilinear=True):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
         self.scale_channels = scale_channels
+        dilated_input = n_classes == 1
 
-        self.inc = DoubleConv(n_channels, scale_channels)
+        self.inc = DoubleConv(n_channels, scale_channels, dilated_input)
         self.down1 = Down(scale_channels, scale_channels * 2)
         self.down2 = Down(scale_channels * 2, scale_channels * 4)
         self.down3 = Down(scale_channels * 4, scale_channels * 8)

@@ -63,14 +63,14 @@ class ImageTrace(Trace):
         self.did_wrote = False
         if self.channels == 1:
             h = self.inp.shape[0]
-            w = self.inp.shape[1] * 3
+            w = self.inp.shape[1]
         else:
             h = self.inp.shape[1]
-            w = self.inp.shape[2] * 3
-        out = np.zeros((3, h, w), dtype=np.uint8)
-        out[:, :, :w//3] = self.inp
-        out[:, :, w//3:2*(w//3)] = self.pred[:3, :, :]
-        out[:, :, 2*(w//3):] = self.lbl[:3, :, :]
+            w = self.inp.shape[2]
+        out = np.zeros((3, h, 3 * w), dtype=np.uint8)
+        out[:, :, :w] = self.inp
+        out[:, :, w:2*w] = self.pred[:3, :, :]
+        out[:, :, 2*w:] = self.lbl[:3, :, :]
         self.writer.add_image('input | predicted | label', out, global_step=step, dataformats='CHW')
         self.step = step
 

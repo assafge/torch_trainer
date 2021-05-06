@@ -1,4 +1,3 @@
-
 import torch
 from general_utils import read_yaml, get_class, print_progress
 import os
@@ -69,6 +68,7 @@ class UtilityObj:
 
 class TorchTrainer:
     """wrapper class for torch models training"""
+
     def __init__(self, cfg: ConfigurationStruct, root, gpu_index: int):
         self.cfg = cfg
         if int(gpu_index) >= 0 and torch.cuda.is_available():
@@ -126,7 +126,8 @@ class TorchTrainer:
         model_cls = get_class(self.cfg.model.type, file_path=self.cfg.model.path)
         self.model = model_cls(**self.cfg.model.kargs)
         dataset_cls = get_class(self.cfg.data.type, file_path=self.cfg.data.path)
-        self.dataset = dataset_cls(self.root, self.cfg.model.in_channels, self.cfg.model.out_channels, **self.cfg.data.kargs)
+        self.dataset = dataset_cls(self.root, self.cfg.model.in_channels, self.cfg.model.out_channels,
+                                   **self.cfg.data.kargs)
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
@@ -208,9 +209,12 @@ class TorchTrainer:
                     inputs, labels = x.to(self.device), y.to(self.device)
                     outputs = self.model(inputs)
                     self.optimizer.zero_grad()
-                    # loss = rgb_crit(outputs[:, :3, :, :], labels[:, :3, :, :]) + crit(outputs, labels)
+                    loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + crit[1](outputs, labels)
                     # loss = crit(outputs, labels)
-                    loss = sum([c(outputs, labels) for c in crit])
+                    # loss = sum([c(outputs, labels) for c in crit])
+                    # loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + \
+                    #        crit[0](outputs[:, 3:, :, :], labels[:, 3:, :, :]) + \
+                    #        crit[1](outputs, labels)
                     loss.backward()
                     self.optimizer.step()
                     train.step(loss, inputs, outputs, labels, epoch)
@@ -222,14 +226,17 @@ class TorchTrainer:
                 test.init_loop()
                 with torch.no_grad():
                     for test_loader in test.loaders:
-                    #     prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
-                    #     for x, y in prog:
+                        #     prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
+                        #     for x, y in prog:
                         for x, y in test_loader:
                             inputs, labels = x.to(self.device), y.to(self.device)
                             outputs = self.model(inputs)
-                            # loss = rgb_crit(outputs[:, :3, :, :], labels[:, :3, :, :]) + crit(outputs, labels)
+                            loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + crit[1](outputs, labels)
+                            # loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + \
+                            #        crit[0](outputs[:, 3:, :, :], labels[:, 3:, :, :]) + \
+                            #        crit[1](outputs, labels)
                             # loss = crit(outputs, labels)
-                            loss = sum([c(outputs, labels) for c in crit])
+                            # loss = sum([c(outputs, labels) for c in crit])
                             test.step(loss.item(), inputs, outputs, labels, self.start_epoch)
                             # prog.set_description(f'validation loss {loss.item():.2}')
                 # self.save_to_debug(inputs, outputs, labels)
@@ -250,5 +257,3 @@ class TorchTrainer:
             cv2.imwrite('{}/{}_input.png'.format(out_path, i), cv2.cvtColor(inp, cv2.COLOR_RGB2BGR))
             cv2.imwrite('{}/{}_predict.png'.format(out_path, i), cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
             cv2.imwrite('{}/{}_label.png'.format(out_path, i), cv2.cvtColor(lbl, cv2.COLOR_RGB2BGR))
-
-

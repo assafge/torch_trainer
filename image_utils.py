@@ -166,6 +166,16 @@ def coll_fn_rand_rot90_float(data):
     return im_tensor, lbl_tensor
 
 
+def mosaic_image(rgb, pattern='rggb'):
+    if pattern == 'rggb':
+        rggb = np.zeros(rgb.shape[:2], dtype=rgb.dtype)
+        rggb[::2, ::2] = rgb[::2, ::2, 0]    # r
+        rggb[1::2, ::2] = rgb[1::2, ::2, 1]  # g1
+        rggb[::2, 1::2] = rgb[::2, 1::2, 1]  # g2
+        rggb[1::2, 1::2] = rgb[1::2, 1::2, 2]   # b
+        return rggb
+
+
 def myplot(im, ref):
     import matplotlib.pyplot as plt
     fig, (ax1, ax2) = plt.subplots(1, 2)
