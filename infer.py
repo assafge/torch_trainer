@@ -94,7 +94,7 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
         out_im = out.squeeze().cpu().numpy()
         out_im = out_im.transpose(1, 2, 0)
         return out_im, return_img
-    if out.ndim > 3 and out.shape[1] > 5:  # segmentation
+    if out.ndim > 3 and out.shape[1] > 7:  # segmentation
         outs = out.argmax(dim=1).squeeze()
         out_im = outs.cpu().numpy()
         out_im = out_im.astype(np.uint8)
@@ -320,17 +320,31 @@ def main():
                 demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
                 do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image, do_mosaic=args.mosaic_images)
                 ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
-                ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
-                mse_rgb_ir.append((mse(ref_rgb, out_im[:, :, :3]), mse(ref_ir, out_im[:, :, 3])))
+                if out_im.shape[2] == 4:
+                    multi_ir = False
+                    ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
+                if out_im.shape[2] == 6:
+                    multi_ir = True
+                    ref_ir = cv2.cvtColor(cv2.imread(im_path.ir), cv2.COLOR_BGR2RGB)
+                if multi_ir:
+                    mse_rgb_ir.append((mse(ref_rgb, out_im[:, :, :3]), mse(ref_ir, out_im[:, :, 3:])))
+                else:
+                    mse_rgb_ir.append((mse(ref_rgb, out_im[:, :, :3]), mse(ref_ir, out_im[:, :, 3])))
                 rgb_range = out_im[:, :, :3].max() - out_im[:, :, :3].min()
-                ir_range = out_im[:, :, 3].max() - out_im[:, :, 3].min()
-                ssim_rgb_ir.append((ssim(ref_rgb, out_im[:, :, :3], data_range=rgb_range, multichannel=True),
-                                    ssim(ref_ir, out_im[:, :, 3], data_range=ir_range)))
+                ir_range = out_im[:, :, 3:].max() - out_im[:, :, 3:].min()
+                if multi_ir:
+                    ssim_rgb_ir.append((ssim(ref_rgb, out_im[:, :, :3], data_range=rgb_range, multichannel=True),
+                                    ssim(ref_ir, out_im[:, :, 3:], data_range=ir_range, multichannel=multi_ir)))
+                else:
+                    ssim_rgb_ir.append((ssim(ref_rgb, out_im[:, :, :3], data_range=rgb_range, multichannel=True),
+                                        ssim(ref_ir, out_im[:, :, 3], data_range=ir_range, multichannel=multi_ir)))
                 psnr_rgb_ir.append(10 * np.log10((255.0**2) / np.array(mse_rgb_ir[-1])))
                 rgb_out = test_dir.joinpath(Path(im_path.rgb).stem + '_est.png')
                 ir_out = test_dir.joinpath(Path(im_path.ir).stem + '_est.png')
-                cv2.imwrite(str(rgb_out), cv2.cvtColor(out_im[:, :, :3], cv2.COLOR_RGB2BGR))
-                cv2.imwrite(str(ir_out), out_im[:, :, 3])
+                cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(out_im[:, :, :3], cv2.COLOR_RGB2BGR))
+                if out_im.shape[2] == 6:
+                    cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(out_im[:, :, 3:], cv2.COLOR_RGB2BGR))
+                cv2.imwrite(ir_out.as_posix(), out_im[:, :, 3:])
             test_df[['mse_rgb', 'mse_ir']] = mse_rgb_ir
             test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
             test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir

@@ -5,7 +5,6 @@ import torch.nn.functional as F
 
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
-
     def __init__(self, in_channels, out_channels, dilated=False):
         super().__init__()
         if dilated:
@@ -29,7 +28,6 @@ class DoubleConv(nn.Module):
 
 class Down(nn.Module):
     """Downscaling with maxpool then double conv"""
-
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
@@ -43,7 +41,6 @@ class Down(nn.Module):
 
 class Up(nn.Module):
     """Upscaling then double conv"""
-
     def __init__(self, in_channels, out_channels, bilinear=True):
         super().__init__()
         if bilinear:
