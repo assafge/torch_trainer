@@ -47,17 +47,22 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
                     demosaic: bool =False, rotate: bool = False, bit_depth: int = 8, raw_result: bool = False,
                     do_crop: bool = False, gray: bool = False, fliplr: bool = False, boost: bool = False,
                     split_inference: bool = False, do_mosaic: bool = False):
-    max_bit = (2**bit_depth) - 1
     if demosaic:
         # im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
         im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
         # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerBG2RGB).astype(np.float32)
         im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(im_raw, pattern='GRBG')
         # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerRG2RGB).astype(np.float32)
+        max_bit = (2 ** bit_depth) - 1
     elif gray:
         im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
+        max_bit = (2 ** bit_depth) - 1
     else:
-        im_raw = cv2.imread(im_path)
+        im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
+        if str(im_raw.dtype) == 'uint16':
+            max_bit = 2**16 - 1
+        else:
+            max_bit = (2 ** bit_depth) - 1
         im_raw = cv2.cvtColor(im_raw, cv2.COLOR_BGR2RGB).astype(np.float32)
     if do_mosaic:
         im_raw = mosaic_image(im_raw, pattern='rggb')

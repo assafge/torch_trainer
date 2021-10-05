@@ -180,16 +180,20 @@ class TorchTrainer:
         return train, test
 
     def init_loss_func(self):
-        criteria = []
-        for loss, loss_cfg in self.cfg.model.loss.items():
+        criterias = []
+        factors = []
+        for loss_name, loss_cfg in self.cfg.model.loss.items():
             module_path = loss_cfg['module_path'] if 'module_path' in loss_cfg else 'torch.nn'
-            criterion_cls = get_class(loss, module_path)
-            criteria.append(criterion_cls(**loss_cfg['kargs']))
+            criterion_cls = get_class(loss_name, module_path)
+            criterias.append(criterion_cls(**loss_cfg['kargs']))
+            factors.append(loss_cfg['factor'] if 'factor' in loss_cfg else 1)
+        crit = lambda preds, labels: sum([factor * criteria(preds, labels) for factor, criteria in zip(factors, criterias)])
+
         # if 'weights' in vars(self.dataset):
         #     if self.dataset.weights is not None:
         #         self.cfg.model.loss_kargs.update({
         #             'weight': torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)})
-        return criteria
+        return crit
 
     def train(self):
         self.model.zero_grad()
@@ -209,12 +213,7 @@ class TorchTrainer:
                     inputs, labels = x.to(self.device), y.to(self.device)
                     outputs = self.model(inputs)
                     self.optimizer.zero_grad()
-                    loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + crit[1](outputs, labels)
-                    # loss = crit(outputs, labels)
-                    # loss = sum([c(outputs, labels) for c in crit])
-                    # loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + \
-                    #        crit[0](outputs[:, 3:, :, :], labels[:, 3:, :, :]) + \
-                    #        crit[1](outputs, labels)
+                    loss = crit(outputs, labels)
                     loss.backward()
                     self.optimizer.step()
                     train.step(loss, inputs, outputs, labels, epoch)
@@ -231,12 +230,7 @@ class TorchTrainer:
                         for x, y in test_loader:
                             inputs, labels = x.to(self.device), y.to(self.device)
                             outputs = self.model(inputs)
-                            loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + crit[1](outputs, labels)
-                            # loss = crit[0](outputs[:, :3, :, :], labels[:, :3, :, :]) + \
-                            #        crit[0](outputs[:, 3:, :, :], labels[:, 3:, :, :]) + \
-                            #        crit[1](outputs, labels)
-                            # loss = crit(outputs, labels)
-                            # loss = sum([c(outputs, labels) for c in crit])
+                            loss = crit(outputs, labels)
                             test.step(loss.item(), inputs, outputs, labels, self.start_epoch)
                             # prog.set_description(f'validation loss {loss.item():.2}')
                 # self.save_to_debug(inputs, outputs, labels)

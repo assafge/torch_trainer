@@ -87,9 +87,9 @@ def pad_2d(img: np.ndarray, divisor) -> np.ndarray:
     top, left = expand // 2
     bottom, right = expand - (expand // 2)
     if img.ndim > 2:
-        return np.pad(img, pad_width=((top, bottom), (left, right), (0, 0)), mode='constant')
+        return np.pad(img, pad_width=((top, bottom), (left, right), (0, 0)), mode='symmetric')
     else:
-        return np.pad(img, pad_width=((top, bottom), (left, right)), mode='constant')
+        return np.pad(img, pad_width=((top, bottom), (left, right)), mode='symmetric')
 
 
 def random_crop(img, label, patch_size, edge_border):
