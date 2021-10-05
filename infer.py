@@ -321,6 +321,9 @@ def main():
             ssim_rgb_ir = []
             psnr_rgb_ir = []
             for _, im_path in tqdm(test_df.iterrows()):
+                if not Path(im_path.full).exists():
+                    print('ERROR', im_path.full, 'is missing')
+                    continue
                 out_im, in_img = inference_image(trainer, im_path=im_path.full,
                 demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
                 do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image, do_mosaic=args.mosaic_images)

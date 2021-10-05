@@ -1,5 +1,5 @@
 import torch
-from general_utils import read_yaml, get_class, print_progress
+from general_utils import read_yaml, get_class
 import os
 from shutil import rmtree
 from datetime import datetime
@@ -9,10 +9,19 @@ from traces import Trace
 from typing import List
 import yaml
 from tqdm import tqdm, trange
+from collections import OrderedDict
+import pandas as pd
+from pathlib import Path
+
 
 # debug
 import numpy as np
 import cv2
+# from dataclasses import make_dataclass
+#
+#
+# LossValue = make_dataclass("LossValue", [('timeStamp', int), ('frameIdx', int), ('id', int), ('tag', str),
+#                                           ('x', float), ('y', float), ('z', float), ('activity', float)])
 
 
 class ConfigurationStruct:
@@ -82,7 +91,8 @@ class TorchTrainer:
         self.start_epoch: int = 0
         self.root = root
         self.dataset = None
-        self.running = True
+        self.running = False
+        self.loss_debug = OrderedDict()
 
     @classmethod
     def new_train(cls, out_path, model_cfg, optimizer_cfg, dataset_cfg, gpu_index, exp_name):
@@ -183,12 +193,19 @@ class TorchTrainer:
         criterias = []
         factors = []
         for loss_name, loss_cfg in self.cfg.model.loss.items():
+            self.loss_debug[loss_name] = []
             module_path = loss_cfg['module_path'] if 'module_path' in loss_cfg else 'torch.nn'
             criterion_cls = get_class(loss_name, module_path)
             criterias.append(criterion_cls(**loss_cfg['kargs']))
             factors.append(loss_cfg['factor'] if 'factor' in loss_cfg else 1)
-        crit = lambda preds, labels: sum([factor * criteria(preds, labels) for factor, criteria in zip(factors, criterias)])
 
+        def crit(preds, labels):
+            losses = []
+            for factor, criteria, name in zip(factors, criterias, self.loss_debug.keys()):
+                loss = factor * criteria(preds, labels)
+                self.loss_debug[name] = loss.item()
+                losses.append(loss)
+            return sum(losses)
         # if 'weights' in vars(self.dataset):
         #     if self.dataset.weights is not None:
         #         self.cfg.model.loss_kargs.update({
@@ -239,6 +256,10 @@ class TorchTrainer:
                     best_loss = test.aggregated_loss
                 if epoch > self.cfg.model.epochs / 4:
                     self.save_checkpoint(best_loss == test.aggregated_loss, epoch)
+
+            df = pd.DataFrame.from_records([self.loss_debug])
+            df.to_csv(Path(self.root).joinpath('losses_debug.csv'))
+
 
     def debug_save(self, inputs, outputs, labels):
         out_path = '/tmp/minibatch_debug'
