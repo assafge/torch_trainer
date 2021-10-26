@@ -1,0 +1,26 @@
+FULL:
+  path: /home/assaf/data/hyperspectral/sample_images
+  pattern: '*_full.png'
+  action: rggb_crop
+REF_RGB:
+  path: /home/assaf/data/hyperspectral/sample_images
+  pattern: '*_rgb.png'
+  action: rggb_crop
+REF_IR:
+  path: /home/assaf/data/hyperspectral/sample_images
+  pattern: '*ir.png'
+  action: rggb_crop
+Empty:
+  path: mock
+  pattern: '*.png'
+  action: rggb_crop
+
+RGB:
+  path: /home/assaf/data/hyperspectral/sample_images
+  pattern: '*rgb_est.png'
+  action: rgb
+
+IR:
+  path: /home/assaf/data/hyperspectral/sample_images
+  pattern: '*ir_est.png'
+  action: rgb
