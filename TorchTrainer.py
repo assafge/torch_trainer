@@ -10,18 +10,10 @@ from typing import List
 import yaml
 from tqdm import tqdm, trange
 from collections import OrderedDict
-import pandas as pd
-from pathlib import Path
-
-
-# debug
+# import pandas as pd
+# from pathlib import Path
 import numpy as np
 import cv2
-# from dataclasses import make_dataclass
-#
-#
-# LossValue = make_dataclass("LossValue", [('timeStamp', int), ('frameIdx', int), ('id', int), ('tag', str),
-#                                           ('x', float), ('y', float), ('z', float), ('activity', float)])
 
 
 class ConfigurationStruct:
@@ -33,7 +25,7 @@ class ConfigurationStruct:
 
 
 class UtilityObj:
-    def __init__(self, loaders, writer_path, measurements=None):
+    def __init__(self, loaders, writer_path, measurements=None, losses_names=None):
         if measurements is None:
             measurements = {}
         if type(loaders) is list:
@@ -44,35 +36,47 @@ class UtilityObj:
             print('error - data loader is invalid')
         self.writer = SummaryWriter(writer_path)
         self.aggregated_loss = 0.0
-        self.index = 0
+        self.steps = 0
         self.name = os.path.basename(writer_path)
         self.pname = self.name + (' ' * (7 - len(self.name)))
         self.traces: List[Trace] = []
+        self.losses = OrderedDict({l: 0.0 for l in losses_names})
 
         if measurements:
             for meas in measurements.values():
                 cls_ = get_class(meas['type'], meas['path'])
                 self.traces.append(cls_(self.writer, self.size))
 
-    def step(self, loss, inputs, pred, labels, epoch):
+    def step(self, loss, inputs, pred, labels, losses=None):
         for m in self.traces:
             m.add_measurement(inputs, pred, labels)
         self.aggregated_loss += loss
-        self.index += 1
+        self.steps += 1
+        if self.losses and losses:
+            for agg_loss_type, loss_res in zip(self.losses.keys(), losses):
+                self.losses[agg_loss_type] += loss_res.item()
 
     def epoch_step(self, epoch):
         for m in self.traces:
-            m.write_epoch(epoch)
+            try:
+                m.write_epoch(epoch)
+            except Exception:
+                pass
         avr = self.aggregated_loss / self.size
         self.writer.add_scalar('Loss', avr, global_step=epoch)
+        for loss_name, loss_val in self.losses.items():
+            self.writer.add_scalar(f'Losses/{loss_name}', loss_val/self.size, global_step=epoch)
+        self.init_loop()
 
     def init_loop(self):
-        self.aggregated_loss = 0
-        self.index = 0
+        self.aggregated_loss = 0.0
+        self.steps = 0
+        for loss_name in self.losses.keys():
+            self.losses[loss_name] = 0.0
 
     @property
     def size(self):
-        return sum([len(loader) for loader in self.loaders])
+        return max(self.steps, 1)
 
 
 class TorchTrainer:
@@ -152,18 +156,18 @@ class TorchTrainer:
         checkpoint = torch.load(cp_path, map_location=self.device)
         self.start_epoch = checkpoint['epoch']
         self.model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
-        if not strict:
-            print('non strict', self.model.fine_tune_)
-            if self.model.fine_tune is not None and self.cfg.model.fine_tune_kargs is not None:
-                self.model.fine_tune(**self.cfg.model.fine_tune_kargs)
-            optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
-            self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
-        else:
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            for state in self.optimizer.state.values():
-                for k, v in state.items():
-                    if isinstance(v, torch.Tensor):
-                        state[k] = v.to(self.device)
+        # if not strict:
+        #     print('non strict', self.model.fine_tune_)
+        #     if self.model.fine_tune is not None and self.cfg.model.fine_tune_kargs is not None:
+        #         self.model.fine_tune(**self.cfg.model.fine_tune_kargs)
+        #     optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
+        #     self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
+        # else:
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(self.device)
         self.model.to(self.device)
 
     def save_checkpoint(self, better, epoch):
@@ -181,85 +185,88 @@ class TorchTrainer:
         #                 'model_state_dict': self.model.state_dict(),
         #                 'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
 
-    def init_training_obj(self):
+    def init_training_obj(self, loss_names):
         """create helper objects in order to make the train function more clear"""
         train_loaders, test_loaders = self.dataset.get_data_loaders(self.cfg.model.batch_size)
-        train = UtilityObj(loaders=train_loaders, writer_path=os.path.join(self.root, 'train'))
+        train = UtilityObj(loaders=train_loaders, writer_path=os.path.join(self.root, 'train'), losses_names=loss_names)
         test = UtilityObj(loaders=test_loaders, writer_path=os.path.join(self.root, 'test'),
-                          measurements=self.cfg.model.test_traces)
+                          measurements=self.cfg.model.test_traces, losses_names=loss_names)
         return train, test
 
     def init_loss_func(self):
         criterias = []
         factors = []
+        loss_names = []
+        use_consistency = False
         for loss_name, loss_cfg in self.cfg.model.loss.items():
-            self.loss_debug[loss_name] = []
+            loss_names.append(loss_name)
             module_path = loss_cfg['module_path'] if 'module_path' in loss_cfg else 'torch.nn'
             criterion_cls = get_class(loss_name, module_path)
-            criterias.append(criterion_cls(**loss_cfg['kargs']))
-            factors.append(loss_cfg['factor'] if 'factor' in loss_cfg else 1)
+            class_instance = criterion_cls(**loss_cfg['kargs'])
+            if class_instance is torch.nn.Module:
+                class_instance.to(self.device)
+            criterias.append(class_instance)
+            if 'factor' in loss_cfg:
+                factors.append(eval(loss_cfg['factor']) if type(loss_cfg['factor']) is str else loss_cfg['factor'])
+            else:
+                factors.append(1)
+            if use_consistency:
+                loss_names.append('Consistency')
 
-        def crit(preds, labels):
+        def crit(inputs, preds, labels):
             losses = []
-            for factor, criteria, name in zip(factors, criterias, self.loss_debug.keys()):
-                loss = factor * criteria(preds, labels)
-                self.loss_debug[name] = loss.item()
-                losses.append(loss)
-            return sum(losses)
-        # if 'weights' in vars(self.dataset):
-        #     if self.dataset.weights is not None:
-        #         self.cfg.model.loss_kargs.update({
-        #             'weight': torch.as_tensor(data=self.dataset.weights, dtype=torch.float, device=self.device)})
-        return crit
+            for factor, criteria in zip(factors, criterias):
+                losses.append(factor * criteria(preds, labels))
+            if use_consistency:
+                consistency = torch.nn.functional.mse_loss(inputs, ((preds[:, :3] + preds[:, 3:]) / 2))
+                losses.append(consistency)
+            return losses
+        return crit, loss_names
 
     def train(self):
         self.model.zero_grad()
-        train, test = self.init_training_obj()
+        crit, loss_names = self.init_loss_func()
+        train, test = self.init_training_obj(loss_names)
         best_loss = 2 ** 16
         self.running = True
-        # rgb_crit, crit = self.init_loss_func()
-        crit = self.init_loss_func()
-        self.model.train()
-        ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=100)
+
+        ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=120)
         for epoch in ep_prog:
-            train.init_loop()
+            if epoch % 50 == 0:
+                test_freq = int(0.5 + (-7 * np.log(epoch+1/self.cfg.model.epochs + 2)))
+            self.model.train()
             for train_loader in train.loaders:
-                # prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
-                # for x, y in prog:
-                for x, y in train_loader:
+                prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
+                for x, y in prog:
                     inputs, labels = x.to(self.device), y.to(self.device)
                     outputs = self.model(inputs)
                     self.optimizer.zero_grad()
-                    loss = crit(outputs, labels)
+                    losses = crit(inputs, outputs, labels)
+                    loss = sum(losses)
                     loss.backward()
                     self.optimizer.step()
-                    train.step(loss, inputs, outputs, labels, epoch)
-                    # prog.set_description(f'train loss {loss.item():.2}')
+                    train.step(loss, inputs, outputs, labels, losses)
+                    prog.set_description(f'train loss {loss.item():.2}')
             train.epoch_step(epoch)
 
-            if epoch % 3 == 0:
+            if epoch % test_freq == 0:
                 self.model.eval()
-                test.init_loop()
                 with torch.no_grad():
                     for test_loader in test.loaders:
-                        #     prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
-                        #     for x, y in prog:
-                        for x, y in test_loader:
+                        prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
+                        for x, y in prog:
                             inputs, labels = x.to(self.device), y.to(self.device)
                             outputs = self.model(inputs)
-                            loss = crit(outputs, labels)
-                            test.step(loss.item(), inputs, outputs, labels, self.start_epoch)
-                            # prog.set_description(f'validation loss {loss.item():.2}')
-                # self.save_to_debug(inputs, outputs, labels)
-                test.epoch_step(epoch)
+                            losses = crit(inputs, outputs, labels)
+                            loss = sum(losses)
+                            test.step(loss.item(), inputs, outputs, labels, losses)
+                            prog.set_description(f'validation loss {loss.item():.2}')
                 if test.aggregated_loss < best_loss:
                     best_loss = test.aggregated_loss
-                if epoch > self.cfg.model.epochs / 4:
-                    self.save_checkpoint(best_loss == test.aggregated_loss, epoch)
-
-            df = pd.DataFrame.from_records([self.loss_debug])
-            df.to_csv(Path(self.root).joinpath('losses_debug.csv'))
-
+                    self.save_checkpoint(better=True, epoch=epoch)
+                else:
+                    self.save_checkpoint(better=False, epoch=epoch)
+                test.epoch_step(epoch)
 
     def debug_save(self, inputs, outputs, labels):
         out_path = '/tmp/minibatch_debug'

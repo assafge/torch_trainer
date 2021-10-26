@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+max_bit16 = (2**16) - 1
+
 '''
 if False:
     import os
@@ -130,8 +132,8 @@ def base_collate_fn(data):
     # Merge arrays (from tuple of 3D to 4D).
     images = np.stack(images, 0)
     labels = np.stack(labels, 0)
-    im_tensor = torch.as_tensor(data=np.ascontiguousarray(images), dtype=torch.float32)
-    lbl_tensor = torch.as_tensor(data=np.ascontiguousarray(labels), dtype=torch.float32)
+    im_tensor = torch.as_tensor(data=images.astype(np.float32) / max_bit16, dtype=torch.float32)
+    lbl_tensor = torch.as_tensor(data=labels.astype(np.float32) / max_bit16, dtype=torch.float32)
     if im_tensor.ndim < lbl_tensor.ndim:
         im_tensor = im_tensor.unsqueeze(1)
     return im_tensor, lbl_tensor
@@ -144,25 +146,28 @@ def base_collate_fn_random_rot90(data):
     images = np.stack(images, 0)
     labels = np.stack(labels, 0)
     if np.random.rand() > 0.5:
-        images = np.rot90(images, axes=(2, 3))
-        if labels.ndim > 3:
-            labels = np.rot90(labels, axes=(2, 3))
-        else:
-            labels = np.rot90(labels, axes=(1, 2))
+        images = np.rot90(images, axes=(2, 3) if images.ndim > 3 else (1, 2))
+        labels = np.rot90(labels, axes=(2, 3) if labels.ndim > 3 else (1, 2))
     return images, labels
 
 
 def coll_fn_rand_rot90_float_long(data):
     images, labels = base_collate_fn_random_rot90(data)
-    im_tensor = torch.as_tensor(data=np.ascontiguousarray(images), dtype=torch.float32)
-    lbl_tensor = torch.as_tensor(data=np.ascontiguousarray(labels), dtype=torch.long)
+    im_tensor = torch.as_tensor(data=images, dtype=torch.float32)
+    lbl_tensor = torch.as_tensor(data=labels, dtype=torch.long)
     return im_tensor, lbl_tensor
 
 
 def coll_fn_rand_rot90_float(data):
     images, labels = base_collate_fn_random_rot90(data)
-    im_tensor = torch.as_tensor(data=np.ascontiguousarray(images), dtype=torch.float32)
-    lbl_tensor = torch.as_tensor(data=np.ascontiguousarray(labels), dtype=torch.float32)
+    if images.ndim < 4:
+        images = np.expand_dims(images, 1)
+    if labels.ndim < 4:
+        labels = np.expand_dims(labels, 1)
+    images = images.astype(np.float32) / max_bit16
+    labels = labels.astype(np.float32) / max_bit16
+    im_tensor = torch.as_tensor(data=images, dtype=torch.float32)
+    lbl_tensor = torch.as_tensor(data=labels, dtype=torch.float32)
     return im_tensor, lbl_tensor
 
 

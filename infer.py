@@ -48,11 +48,13 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
                     do_crop: bool = False, gray: bool = False, fliplr: bool = False, boost: bool = False,
                     split_inference: bool = False, do_mosaic: bool = False):
     if demosaic:
-        # im_raw = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
-        im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
+        bit_depth = 16
+        src = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
+        # im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
         # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerBG2RGB).astype(np.float32)
-        im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(im_raw, pattern='GRBG')
-        # im_raw = cv2.demosaicing(im_raw, cv2.COLOR_BayerRG2RGB).astype(np.float32)
+        # im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(im_raw, pattern='GRBG')
+        im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(src, pattern='RGGB')
+        # im_raw = cv2.demosaicing(src, cv2.COLOR_BayerRG2RGB).astype(np.float32)
         max_bit = (2 ** bit_depth) - 1
     elif gray:
         im_raw = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
@@ -208,7 +210,7 @@ def display_result(gt_path, trainer, out_im: np.ndarray, in_img: np.ndarray, rot
         cols = 3
     else:
         cols = 2
-    if out_im.shape[2] == 4:
+    if out_im.shape[2] == 4 or out_im.shape[2] == 6:
         cols += 1
     fig, axes = plt.subplots(nrows=1, ncols=cols, sharex=True, sharey=True)
     axes[0].imshow(in_img), axes[0].set_title('in')
@@ -217,11 +219,15 @@ def display_result(gt_path, trainer, out_im: np.ndarray, in_img: np.ndarray, rot
     else:
         axes[1].imshow(out_im[:, :, :3])
     axes[1].set_title('out')
+    cv2.imwrite('rgb.png', cv2.cvtColor(out_im[:, :, :3], cv2.COLOR_RGB2BGR))
     if cols >= 3:
         if gt_path:
             axes[2].imshow(gt), axes[2].set_title('GT')
     if out_im.shape[2] == 4:
         axes[-1].imshow(out_im[:, :, 3], cmap='gray'), axes[-1].set_title('IR')
+    if out_im.shape[2] == 6:
+        axes[-1].imshow(out_im[:, :, 3:]), axes[-1].set_title('IR')
+        cv2.imwrite('ir.png', cv2.cvtColor(out_im[:, :, 3:], cv2.COLOR_RGB2BGR))
 
     plt.show()
 
@@ -294,9 +300,10 @@ def main():
             assert len(images) > 0, 'WARNING - images list is empty, check glob input: {}'.format(glob_patt)
             for i, im_path in enumerate(images):
                 print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*20), length=20)
-                out_im, in_img = inference_image(trainer, im_path=im_path, factors=factors,
-                demosaic=args.demosaic, rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
-                do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image, mosaic=args.mosaic_images)
+                out_im, in_img = inference_image(trainer, im_path=im_path, factors=factors, demosaic=args.demosaic,
+                                                 rotate=args.rot90, bit_depth=args.bit_depth, raw_result=args.mat_out,
+                                                 do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr,
+                                                 boost=args.boost_image, do_mosaic=args.mosaic_images)
 
                 if args.out_type is not None:
                     out_dir = os.path.join(in_path, args.out_type, model_name)

@@ -10,14 +10,18 @@ class DoubleConv(nn.Module):
         if dilated:
             dilation = 2
             padding = 3
+            # padding_mode = 'zeros'
         else:
             dilation = 1
             padding = 1
+            # padding_mode = 'reflect'
         self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, dilation=dilation, padding=padding),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, dilation=dilation,
+                      padding=padding, padding_mode='reflect'),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, dilation=dilation, padding=padding),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, dilation=dilation,
+                      padding=padding, padding_mode='reflect'),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
