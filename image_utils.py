@@ -80,7 +80,7 @@ if False:
 '''
 
 
-def pad_2d(img: np.ndarray, divisor) -> np.ndarray:
+def pad_2d(img: np.ndarray, divisor, dims='hwc') -> np.ndarray:
     """return padded image to shape of nearest divisor"""
     if np.sum(np.array(img.shape[:2]) % divisor) == 0:
         return img

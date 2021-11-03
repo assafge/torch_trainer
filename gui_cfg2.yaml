@@ -1,26 +1,44 @@
 FULL:
   path: /home/assaf/data/hyperspectral/sample_images
   pattern: '*_full.png'
-  action: rggb_crop
+  action: rggb
 REF_RGB:
   path: /home/assaf/data/hyperspectral/sample_images
   pattern: '*_rgb.png'
-  action: rggb_crop
+  action: rggb
 REF_IR:
   path: /home/assaf/data/hyperspectral/sample_images
   pattern: '*ir.png'
-  action: rggb_crop
+  action: rggb
 Empty:
   path: mock
   pattern: '*.png'
-  action: rggb_crop
+  action: rggb
 
 RGB:
-  path: /home/assaf/data/hyperspectral/sample_images
-  pattern: '*rgb_est.png'
+  path: /home/assaf/data/hyperspectral/sample_images/UNet_05Oct21_2338
+  pattern: '*ir_est.png'
   action: rgb
 
 IR:
-  path: /home/assaf/data/hyperspectral/sample_images
+  path: /home/assaf/data/hyperspectral/sample_images/UNet_05Oct21_2338
+  pattern: '*rgb_est.png'
+  action: rgb
+
+Empty2:
+  path: mock
+  pattern: '*.png'
+  action: rggb
+
+RGB2:
+  path: /home/assaf/data/hyperspectral/sample_images/UNet_02Nov21_1828
   pattern: '*ir_est.png'
   action: rgb
+
+IR2:
+  path: /home/assaf/data/hyperspectral/sample_images/UNet_02Nov21_1828
+  pattern: '*rgb_est.png'
+  action: rgb
+
+
+

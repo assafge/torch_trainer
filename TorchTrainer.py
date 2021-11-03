@@ -1,30 +1,23 @@
-import torch
 from general_utils import read_yaml, get_class
+from configuration_objects import TrainingConfiguration
+import torch
 import os
 from shutil import rmtree
 from datetime import datetime
-from time import time
+from time import sleep
 from torch.utils.tensorboard import SummaryWriter
 from traces import Trace
 from typing import List
 import yaml
 from tqdm import tqdm, trange
 from collections import OrderedDict
-# import pandas as pd
-# from pathlib import Path
 import numpy as np
 import cv2
+import signal
 
 
-class ConfigurationStruct:
-    def __init__(self, entries: dict):
-        self.__dict__.update(entries)
-        for key, val in self.__dict__.items():
-            if 'kargs' in key and val is None:
-                self.__dict__[key] = {}
 
-
-class UtilityObj:
+class measurementObj:
     def __init__(self, loaders, writer_path, measurements=None, losses_names=None):
         if measurements is None:
             measurements = {}
@@ -82,7 +75,7 @@ class UtilityObj:
 class TorchTrainer:
     """wrapper class for torch models training"""
 
-    def __init__(self, cfg: ConfigurationStruct, root, gpu_index: int):
+    def __init__(self, cfg: TrainingConfiguration, root, gpu_index: int):
         self.cfg = cfg
         if int(gpu_index) >= 0 and torch.cuda.is_available():
             self.device = torch.device("cuda:" + str(gpu_index))
@@ -97,16 +90,14 @@ class TorchTrainer:
         self.dataset = None
         self.running = False
         self.loss_debug = OrderedDict()
+        self.epoch = 0
 
     @classmethod
     def new_train(cls, out_path, model_cfg, optimizer_cfg, dataset_cfg, gpu_index, exp_name):
         sections = {'model': read_yaml(model_cfg),
                     'optimizer': read_yaml(optimizer_cfg),
                     'data': read_yaml(dataset_cfg)}
-        config_dict = {}
-        for cfg_section, cfg in sections.items():
-            config_dict[cfg_section] = ConfigurationStruct(cfg)
-        config = ConfigurationStruct(config_dict)
+        config = TrainingConfiguration(**sections)
 
         model_dir = config.model.type + datetime.now().strftime("_%d%b%y_%H%M")
         if len(exp_name):
@@ -128,9 +119,7 @@ class TorchTrainer:
     @classmethod
     def warm_startup(cls, root, gpu_index, strict, best=False):
         config_dict = read_yaml(os.path.join(root, 'cfg.yaml'))
-        for cfg_section, cfg_dict in config_dict.items():
-            config_dict[cfg_section] = ConfigurationStruct(cfg_dict)
-        config = ConfigurationStruct(config_dict)
+        config = TrainingConfiguration(**config_dict)
         cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index)
         cls.init_nn()
         cls.load_checkpoint(strict, best=best)
@@ -170,103 +159,108 @@ class TorchTrainer:
                     state[k] = v.to(self.device)
         self.model.to(self.device)
 
-    def save_checkpoint(self, better, epoch):
+    def save_checkpoint(self, better, epoch, mid_checkpoint: bool = False):
         if better:
-            fpath = os.path.join(self.root, 'checkpoints', 'checkpoint.pth'.format(self.start_epoch))
+            fpath = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
+        elif not mid_checkpoint:
+            fpath = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth')
         else:
-            fpath = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth'.format(self.start_epoch))
+            fpath = os.path.join(self.root, 'checkpoints', f'checkpoint_{epoch}.pth')
         torch.save({'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
-        # if self.epoch % 50 == 0:
-        #     fpath = os.path.join(self.root, 'checkpoints', 'checkpoint_{}.pth'.format(self.epoch))
-        #     # print('saving checkpoint {}'.format(fpath))
-        #     torch.save({'epoch': self.epoch,
-        #                 'model_state_dict': self.model.state_dict(),
-        #                 'optimizer_state_dict': self.optimizer.state_dict()}, fpath)
+                    'optimizer_state_dict': self.optimizer.state_dict()}
+                   , fpath)
 
-    def init_training_obj(self, loss_names):
+    def init_measurements_obj(self, loss_names):
         """create helper objects in order to make the train function more clear"""
         train_loaders, test_loaders = self.dataset.get_data_loaders(self.cfg.model.batch_size)
-        train = UtilityObj(loaders=train_loaders, writer_path=os.path.join(self.root, 'train'), losses_names=loss_names)
-        test = UtilityObj(loaders=test_loaders, writer_path=os.path.join(self.root, 'test'),
-                          measurements=self.cfg.model.test_traces, losses_names=loss_names)
+        train = measurementObj(loaders=train_loaders, writer_path=os.path.join(self.root, 'train'), losses_names=loss_names)
+        test = measurementObj(loaders=test_loaders, writer_path=os.path.join(self.root, 'test'),
+                              measurements=self.cfg.model.test_traces, losses_names=loss_names)
         return train, test
 
     def init_loss_func(self):
-        criterias = []
-        factors = []
-        loss_names = []
-        use_consistency = False
+        losses = OrderedDict()
         for loss_name, loss_cfg in self.cfg.model.loss.items():
-            loss_names.append(loss_name)
-            module_path = loss_cfg['module_path'] if 'module_path' in loss_cfg else 'torch.nn'
+            module_path = loss_cfg.module_path
             criterion_cls = get_class(loss_name, module_path)
-            class_instance = criterion_cls(**loss_cfg['kargs'])
-            if class_instance is torch.nn.Module:
-                class_instance.to(self.device)
-            criterias.append(class_instance)
-            if 'factor' in loss_cfg:
-                factors.append(eval(loss_cfg['factor']) if type(loss_cfg['factor']) is str else loss_cfg['factor'])
-            else:
-                factors.append(1)
-            if use_consistency:
-                loss_names.append('Consistency')
+            class_instance = criterion_cls(**loss_cfg.kargs) if len(loss_cfg.kargs) else criterion_cls()
+            if issubclass(criterion_cls, torch.nn.Module):
+                class_instance = class_instance.to(self.device)
+            losses[loss_name] = class_instance
 
         def crit(inputs, preds, labels):
-            losses = []
-            for factor, criteria in zip(factors, criterias):
-                losses.append(factor * criteria(preds, labels))
-            if use_consistency:
-                consistency = torch.nn.functional.mse_loss(inputs, ((preds[:, :3] + preds[:, 3:]) / 2))
-                losses.append(consistency)
-            return losses
-        return crit, loss_names
+            criteria = []
+            for loss_name, criterion in losses.items():
+                loss_cfg = self.cfg.model.loss[loss_name]
+                if 'Consistency' in criterion.__repr__(): # TODO fix it
+                    criteria.append(loss_cfg.factor * criterion(inputs, preds))
+                else:
+                    if loss_cfg.im_channels is not None:
+                        loss = loss_cfg.factor * criterion(preds[:, loss_cfg.im_channels], labels[:, loss_cfg.im_channels])
+                        criteria.append(loss)
+                    else:
+                        criteria.append(loss_cfg.factor * criterion(preds, labels))
+            return criteria
+        return crit, list(losses.keys())
+
+    def signal_handler(self, sig, frame):
+        self.running = False
 
     def train(self):
         self.model.zero_grad()
         crit, loss_names = self.init_loss_func()
-        train, test = self.init_training_obj(loss_names)
+        train_meas, test_meas = self.init_measurements_obj(loss_names)
         best_loss = 2 ** 16
         self.running = True
+        signal.signal(signal.SIGINT, self.signal_handler)
 
         ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=120)
         for epoch in ep_prog:
             if epoch % 50 == 0:
-                test_freq = int(0.5 + (-7 * np.log(epoch+1/self.cfg.model.epochs + 2)))
+                test_freq = max(int(-50 * np.log((epoch+1)/(self.cfg.model.epochs+1))), 1)
             self.model.train()
-            for train_loader in train.loaders:
+            for train_loader in train_meas.loaders:
                 prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
                 for x, y in prog:
-                    inputs, labels = x.to(self.device), y.to(self.device)
-                    outputs = self.model(inputs)
-                    self.optimizer.zero_grad()
-                    losses = crit(inputs, outputs, labels)
-                    loss = sum(losses)
-                    loss.backward()
-                    self.optimizer.step()
-                    train.step(loss, inputs, outputs, labels, losses)
-                    prog.set_description(f'train loss {loss.item():.2}')
-            train.epoch_step(epoch)
+                    if self.running:
+                        inputs, labels = x.to(self.device), y.to(self.device)
+                        outputs = self.model(inputs)
+                        self.optimizer.zero_grad()
+                        losses = crit(inputs, outputs, labels)
+                        loss = sum(losses)
+                        loss.backward()
+                        self.optimizer.step()
+                        train_meas.step(loss, inputs, outputs, labels, losses)
+                        prog.set_description(f'train loss {loss.item():.2}')
+            train_meas.epoch_step(epoch)
 
-            if epoch % test_freq == 0:
+            if epoch % test_freq == 0 and self.running:
                 self.model.eval()
                 with torch.no_grad():
-                    for test_loader in test.loaders:
+                    for test_loader in test_meas.loaders:
                         prog = tqdm(test_loader, desc='validation', leave=False, ncols=100)
-                        for x, y in prog:
-                            inputs, labels = x.to(self.device), y.to(self.device)
-                            outputs = self.model(inputs)
-                            losses = crit(inputs, outputs, labels)
-                            loss = sum(losses)
-                            test.step(loss.item(), inputs, outputs, labels, losses)
-                            prog.set_description(f'validation loss {loss.item():.2}')
-                if test.aggregated_loss < best_loss:
-                    best_loss = test.aggregated_loss
+                        if self.running:
+                            for x, y in prog:
+                                inputs, labels = x.to(self.device), y.to(self.device)
+                                outputs = self.model(inputs)
+                                losses = crit(inputs, outputs, labels)
+                                loss = sum(losses)
+                                test_meas.step(loss.item(), inputs, outputs, labels, losses)
+                                prog.set_description(f'validation loss {loss.item():.2}')
+                if test_meas.aggregated_loss < best_loss:
+                    best_loss = test_meas.aggregated_loss
                     self.save_checkpoint(better=True, epoch=epoch)
                 else:
                     self.save_checkpoint(better=False, epoch=epoch)
-                test.epoch_step(epoch)
+                test_meas.epoch_step(epoch)
+            if epoch % 200 == 0:
+                self.save_checkpoint(better=False, epoch=epoch, mid_checkpoint=True)
+            if not self.running:
+                print()
+                print('saving model and exiting...')
+                self.save_checkpoint(False, epoch - 1)
+                return
 
     def debug_save(self, inputs, outputs, labels):
         out_path = '/tmp/minibatch_debug'

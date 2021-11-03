@@ -241,7 +241,7 @@ class MainWin(QWidget):
             self.init_side_layout()
 
     def init_input(self):
-        rows = 2 if len(self.inputs) <= 10 else 3
+        rows = 2 if len(self.inputs) <= 8 else 3
         cols = (len(self.inputs) // rows) + len(self.inputs) % rows
         in_iter = iter(self.inputs.values())
         for r in range(rows):

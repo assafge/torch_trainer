@@ -4,7 +4,7 @@ import torchvision
 class VGGPerceptualLoss(torch.nn.Module):
     """https://gist.github.com/8233cdb0414b4cb5853f2f730ab95a49.git"""
     def __init__(self, resize=True):
-        super(VGGPerceptualLoss, self).__init__()
+        super().__init__()
         blocks = []
         blocks.append(torchvision.models.vgg16(pretrained=True).features[:4].eval())
         blocks.append(torchvision.models.vgg16(pretrained=True).features[4:9].eval())
@@ -18,12 +18,9 @@ class VGGPerceptualLoss(torch.nn.Module):
         self.resize = resize
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+        self.eval()
 
     def forward(self, preds, target, feature_layers=[0, 1, 2, 3], style_layers=[]):
-        self.to(preds.device)
-        if preds.shape[1] == 6:
-            preds = torch.cat([preds[:, :3], preds[:, 3:6]], axis=0)
-            target = torch.cat([target[:, :3], target[:, 3:6]], axis=0)
         preds = (preds - self.mean) / self.std
         target = (target-self.mean) / self.std
         if self.resize:

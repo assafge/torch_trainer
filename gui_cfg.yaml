@@ -27,7 +27,7 @@ RGB_L1_Perceptual_consistancy_16bit:
   pattern: '*_rgb_est.png'
   action: rgb_gamma
 RGB_L1_Perceptual_consistancy_3200E:
-  path: /home/assaf/data/hyperspectral/nets/UNet_25Oct21_1131/test_images
+  path: /home/assaf/data/hyperspectral/nets/UNet_27Oct21_0128/test_images #/home/assaf/data/hyperspectral/nets/UNet_25Oct21_1131/test_images
   pattern: '*_rgb_est.png'
   action: rgb_gamma
 
@@ -59,7 +59,7 @@ IR_L1_Perceptual_consitency_16bit_320:
   action: bgr
 
 IR_L1_Perceptual_consitency_16bit_3200e:
-  path: /home/assaf/data/hyperspectral/nets/UNet_25Oct21_1131/test_images
+  path: /home/assaf/data/hyperspectral/nets/UNet_27Oct21_0128/test_images #/home/assaf/data/hyperspectral/nets/UNet_25Oct21_1131/test_images
   pattern: '*_ir_est.png'
   action: bgr
 

@@ -5,23 +5,21 @@ import torch.nn.functional as F
 
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
-    def __init__(self, in_channels, out_channels, dilated=False):
+    def __init__(self, in_channels, out_channels, dilated=False, padding_mode='reflect'):
         super().__init__()
         if dilated:
             dilation = 2
             padding = 3
-            # padding_mode = 'zeros'
         else:
             dilation = 1
             padding = 1
-            # padding_mode = 'reflect'
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, dilation=dilation,
-                      padding=padding, padding_mode='reflect'),
+                      padding=padding, padding_mode=padding_mode),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, dilation=dilation,
-                      padding=padding, padding_mode='reflect'),
+                      padding=padding, padding_mode=padding_mode),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
