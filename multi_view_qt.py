@@ -81,7 +81,7 @@ class ImageType:
         self.src_dir = Path(cfg.path)
         self.group = QGroupBox(title=name)
         layout = QVBoxLayout()
-        self.in_path = QLabel(self.src_dir.as_posix())
+        self.in_path = QLabel(self.src_dir.name)
         layout.addWidget(self.in_path)
         act_layout = QHBoxLayout()
         layout.addLayout(act_layout)
@@ -89,7 +89,7 @@ class ImageType:
         self.pattern_line = QLineEdit(cfg.pattern)
         act_layout.addWidget(self.pattern_line)
         self.action_select = QComboBox()
-        self.action_select.addItems(['rgb', 'rgb_gamma', 'mono', 'demosaic', 'mosaic', 'bgr'])
+        self.action_select.addItems(['rgb', 'rgb_gamma', 'mono', 'demosaic', 'mosaic', 'bgr', 'rggb_gamma', 'bgr_gamma'])
         act_layout.addWidget(self.action_select)
         self.radio_btn = QRadioButton('pivot')
         self.radio_btn.setChecked(cfg.pivot)
@@ -125,29 +125,31 @@ class ImageType:
             self.convert.append(lambda im: im)
         if 'rggb' in action:
             # self.convert.append(lambda im: cv2.demosaicing(im, cv2.COLOR_BayerRG2RGB))
-            self.convert.append(lambda im: colour_demosaicing.demosaicing_CFA_Bayer_bilinear(im, pattern='RGGB'))
+            self.convert.append(lambda im: cv2.demosaicing(im, cv2.COLOR_BAYER_BG2RGB))
         if 'gamma' in action:
             self.convert.append(auto_gamma_gray)
         if 'crop' in action:
             self.convert.append(lambda im: crop_center(im, 2048, 2048))
 
-    def display_image(self, im_base_name):
+    def display_image(self, im_base_name) -> bool:
         if self.files is None:
             # mock mode
             self.it.setImage(np.zeros((500, 500, 3), dtype=np.uint8))
             self.vb.autoRange()
-            return
+            return True
         for f in self.files:
             if im_base_name in f.stem:
+            # if im_base_name == f.stem.split('_')[0]:
                 im = cv2.imread(f.as_posix(), cv2.IMREAD_UNCHANGED)
                 for conversion in self.convert:
                     im = conversion(im)
                 if im.dtype == np.uint16:
                     im = im // 256
                     im = im.astype(np.uint8)
-                self.it.setImage(np.rot90(im, 3))
+                self.it.setImage(np.rot90(im, 3), autoLevels=False, levelSamples=255)
                 self.vb.autoRange()
-                break
+                return True
+        return False
 
     def exist(self, base_name):
         for f in self.files:
@@ -165,11 +167,8 @@ class MainWin(QWidget):
         self.multi_layout = QGridLayout()
         self.multi_view.setLayout(self.multi_layout)
         self.cfg_path = Path(__file__).parent.joinpath(cfg_path)
-        if self.cfg_path.exists():
-            with self.cfg_path.open('r') as f:
-                self.cfg = yaml.safe_load(f)
-        else:
-            self.cfg = {}
+        with self.cfg_path.open('r') as f:
+            self.cfg = yaml.safe_load(f)
         self.main_layout = QHBoxLayout()
         self.setLayout(self.main_layout)
         self.main_layout.addWidget(self.multi_view)
@@ -250,11 +249,11 @@ class MainWin(QWidget):
                     im_type: ImageType = next(in_iter)
                 except StopIteration:
                     break
-                im_type.start()
                 self.multi_layout.addWidget(im_type.view_group, r, c)
                 if im_type.is_pivot():
                     self.pivot = im_type
                     self.im_gen = self.pivot_iterator()
+                im_type.start()
         for im_type in self.inputs.values():
             if not im_type.is_pivot():
                 im_type.vb.setXLink(self.pivot.vb)
@@ -267,6 +266,7 @@ class MainWin(QWidget):
         for im in self.pivot.files:
             suffix = self.pivot.pattern_line.text().replace('*', '')
             base_name = im.name.replace(suffix, '')
+            # base_name = im.name.replace('.png', '')
             yield base_name
 
     def step_next(self):
@@ -281,7 +281,8 @@ class MainWin(QWidget):
             except StopIteration:
                 return
         for im_type in self.inputs.values():
-            im_type.display_image(base_name)
+            if not im_type.display_image(base_name):
+                print(f'failed to find image in {im_type.name}')
 
     def closeEvent(self, event):
         out_cfg = {}
@@ -299,5 +300,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     app = QApplication([])
-    gui = MainWin(args.cfg_file)
+    cfg_path = Path(__file__).parent.joinpath(args.cfg_file)
+    assert cfg_path.exists(), f'failed to find input file {args.cfg_file} in {Path(__file__).parent}'
+    gui = MainWin(cfg_path)
     app.exec_()

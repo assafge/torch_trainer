@@ -29,7 +29,7 @@ def main():
     args = get_args()
 
     if args.model_path:
-        trainer = TorchTrainer.warm_startup(root=args.model_path, gpu_index=args.gpu_index, strict=args.non_strict)
+        trainer = TorchTrainer.warm_startup(in_path=args.model_path, gpu_index=args.gpu_index, strict=args.non_strict)
     else:
         trainer = TorchTrainer.new_train(out_path=args.out_path, model_cfg=args.model_cfg, optimizer_cfg=args.optimizer_cfg,
                                          dataset_cfg=args.dataset_cfg, gpu_index=args.gpu_index, exp_name=args.exp_name)

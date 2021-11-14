@@ -59,11 +59,11 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
     src = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
     max_bit = (2 ** 16) - 1 if src.dtype == np.uint16 else 255
     if in_channels == 3 and src.ndim == 2 and not gray:
-        im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(src, pattern='RGGB')
-        # im_raw = cv2.demosaicing(src, cv2.COLOR_BayerRG2RGB).astype(np.float)
-        ratio = im_raw.max() / src.max()
-        im_flt = im_raw / max_bit
-        im_flt = (im_flt / ratio).astype(np.float32)
+        # im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(src, pattern='RGGB')
+        im_raw = cv2.demosaicing(src, cv2.COLOR_BAYER_BG2RGB)
+        # ratio = im_raw.max() / src.max()
+        # im_flt = im_raw / max_bit
+        im_flt = (im_raw / max_bit).astype(np.float32)
 
     elif src.ndim > 2 and src.shape[2] == 3:
         im_flt = src[..., ::-1].astype(np.float32) / max_bit  # cv2.COLOR_BGR2RGB
@@ -80,7 +80,7 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
         p = np.percentile(im_flt, 98)
         # print('p', p)
         im_flt = im_flt * (1/p)
-    in_img = np.clip(im_flt, 0, 1)
+    in_img = np.clip(im_flt, 0, 0.9999999)
     if rotate:
         in_img = np.rot90(in_img)
     return_img = (in_img * 255).astype(np.uint8)
@@ -145,16 +145,8 @@ def save_image_type(img: np.ndarray, in_im_path: Path, out_dir: Path, mat_out: b
     if mat_out:
         sio.savemat(out_dir.joinpath(in_im_path.stem+'.mat'), {'dpt': img})
     else:
-        rgb_est = out_dir.joinpath(in_im_path.stem + '_rgb_est.png').as_posix()
-        if img.ndim > 2 and img.shape[2] == 3:
-            cv2.imwrite(rgb_est, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-        elif img.ndim > 2:
-            cv2.imwrite(rgb_est, cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR))
-            ir_est = out_dir.joinpath(in_im_path.stem + '_ir_est.png').as_posix()
-            if img.shape[2] == 6:
-                cv2.imwrite(ir_est, cv2.cvtColor(img[:, :, 3:], cv2.COLOR_RGB2BGR))
-            elif img.shape[2] == 4:
-                cv2.imwrite(ir_est, img[:, :, 3:])
+        out_path = out_dir.joinpath(in_im_path.stem)
+        save_color_image(img, out_path)
 
 
 def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name: str, out_dir: str,
@@ -167,22 +159,7 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name
         out_name = out_path.as_posix() + '.mat'
         sio.savemat(out_name, {'dpt': img})
     else:
-        if img.ndim > 2:
-            if img.shape[2] == 4:
-                rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
-                ir_im = img[:, :, 3]
-                cv2.imwrite(out_path.as_posix() + '_rgb.png', rgb_im)
-                cv2.imwrite(out_path.as_posix() + '_ir.png', ir_im)
-            if img.shape[2] == 6:
-                rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
-                ir_im = cv2.cvtColor(img[:, :, 3:], cv2.COLOR_RGB2BGR)
-                cv2.imwrite(out_path.as_posix() + '_rgb.png', rgb_im)
-                cv2.imwrite(out_path.as_posix() + '_ir.png', ir_im)
-        else:
-            out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            # out_im = img
-            out_name = out_path.as_posix() + '.png'
-            cv2.imwrite(out_name, out_im)
+        save_color_image(img, out_path)
     if do_crop:
         if in_img.ndim > 2 and\
                 not os.path.exists(in_im_path.replace('.png', '_bilinear-demosaic_crop.png')):
@@ -190,6 +167,25 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name
             cv2.imwrite(in_im_path.replace('.png', '_bilinear-demosaic_crop.png'), in_img)
         if not os.path.exists(in_im_path.replace('_crop.png', '_center_crop.png')):
             cv2.imwrite(in_im_path.replace('_crop.png', '_center_crop.png'), in_img)
+
+
+def save_color_image(img, out_path):
+    if img.ndim > 2:
+        if img.shape[2] == 4:
+            rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
+            ir_im = img[:, :, 3]
+            cv2.imwrite(out_path.as_posix() + '_rgb_est.png', rgb_im)
+            cv2.imwrite(out_path.as_posix() + '_ir_est.png', ir_im)
+        if img.shape[2] == 6:
+            rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
+            ir_im = cv2.cvtColor(img[:, :, 3:], cv2.COLOR_RGB2BGR)
+            cv2.imwrite(out_path.as_posix() + '_rgb_est.png', rgb_im)
+            cv2.imwrite(out_path.as_posix() + '_ir_est.png', ir_im)
+    else:
+        out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        # out_im = img
+        out_name = out_path.as_posix() + '.png'
+        cv2.imwrite(out_name, out_im)
 
 
 def display_result(gt_path, trainer, out_im: np.ndarray, in_img: np.ndarray, rot90, do_crop):
@@ -232,7 +228,7 @@ def display_result(gt_path, trainer, out_im: np.ndarray, in_img: np.ndarray, rot
     plt.show()
 
 
-def get_args():
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('model_path', help='path to pre-trained model')
     parser.add_argument('-i', '--images_path', nargs='+', help='list of image or folder or txt file')
@@ -264,13 +260,9 @@ def get_args():
         for in_path in args.images_path:
             assert os.path.exists(in_path), 'ERROR - path is not exist %s' % in_path
 
-    return args
-
-def main():
-    args = get_args()
 
     print('reading model...')
-    trainer = TorchTrainer.warm_startup(root=args.model_path, gpu_index=args.gpu_index, strict=True, best=True)
+    trainer = TorchTrainer.warm_startup(in_path=args.model_path, gpu_index=args.gpu_index, best=True)
     trainer.model.eval()
 
     if args.images_path:
@@ -320,7 +312,8 @@ def main():
     elif args.random_images:
         inference_random_patch(trainer, args.random_images)
     elif args.test_images:
-        model_dir = Path(args.model_path)
+        in_path = Path(args.model_path)
+        model_dir = in_path if in_path.is_dir() else in_path.parent.parent
         test_df = pd.read_csv(model_dir.joinpath('test_images.csv'))
         test_dir = model_dir.joinpath('test_images')
         test_dir.mkdir(exist_ok=True)
@@ -341,29 +334,27 @@ def main():
                 multi_ir = True
                 ref_ir = cv2.cvtColor(cv2.imread(im_path.ir), cv2.COLOR_BGR2RGB)
             if multi_ir:
-                mse_rgb_ir.append((mse(ref_rgb, out_im[:, :, :3]), mse(ref_ir, out_im[:, :, 3:])))
+                mse_rgb_ir.append((mse(ref_rgb, out_im[..., :3]), mse(ref_ir, out_im[:, :, 3:])))
             else:
-                mse_rgb_ir.append((mse(ref_rgb, out_im[:, :, :3]), mse(ref_ir, out_im[:, :, 3])))
-            rgb_range = out_im[:, :, :3].max() - out_im[:, :, :3].min()
-            ir_range = out_im[:, :, 3:].max() - out_im[:, :, 3:].min()
+                mse_rgb_ir.append((mse(ref_rgb, out_im[..., :3]), mse(ref_ir, out_im[:, :, 3])))
+            rgb_range = out_im[:, :, :3].max() - out_im[..., :3].min()
+            ir_range = out_im[..., 3:].max() - out_im[..., 3:].min()
             if multi_ir:
-                ssim_rgb_ir.append((ssim(ref_rgb, out_im[:, :, :3], data_range=rgb_range, multichannel=True),
-                                ssim(ref_ir, out_im[:, :, 3:], data_range=ir_range, multichannel=multi_ir)))
+                ssim_rgb_ir.append((ssim(ref_rgb, out_im[..., :3], data_range=rgb_range, multichannel=True),
+                                ssim(ref_ir, out_im[..., 3:], data_range=ir_range, multichannel=multi_ir)))
             else:
-                ssim_rgb_ir.append((ssim(ref_rgb, out_im[:, :, :3], data_range=rgb_range, multichannel=True),
-                                    ssim(ref_ir, out_im[:, :, 3], data_range=ir_range, multichannel=multi_ir)))
+                ssim_rgb_ir.append((ssim(ref_rgb, out_im[..., :3], data_range=rgb_range, multichannel=True),
+                                    ssim(ref_ir, out_im[..., 3], data_range=ir_range, multichannel=multi_ir)))
             psnr_rgb_ir.append(10 * np.log10((255.0**2) / np.array(mse_rgb_ir[-1])))
             rgb_out = test_dir.joinpath(Path(im_path.rgb).stem + '_est.png')
             ir_out = test_dir.joinpath(Path(im_path.ir).stem + '_est.png')
-            cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(out_im[:, :, :3], cv2.COLOR_RGB2BGR))
+            cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(out_im[..., :3], cv2.COLOR_RGB2BGR))
             if out_im.shape[2] == 6:
-                cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(out_im[:, :, 3:], cv2.COLOR_RGB2BGR))
-            cv2.imwrite(ir_out.as_posix(), out_im[:, :, 3:])
+                cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(out_im[..., 3:], cv2.COLOR_RGB2BGR))
+            cv2.imwrite(ir_out.as_posix(), out_im[..., 3:])
         test_df[['mse_rgb', 'mse_ir']] = mse_rgb_ir
         test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
         test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir
         test_df.to_csv(model_dir.joinpath('test_images.csv'), index_label=False, index=False)
 
 
-if __name__ == '__main__':
-    main()

@@ -14,6 +14,7 @@ from collections import OrderedDict
 import numpy as np
 import cv2
 import signal
+from pathlib import Path
 
 
 
@@ -117,12 +118,25 @@ class TorchTrainer:
         return cls
 
     @classmethod
-    def warm_startup(cls, root, gpu_index, strict, best=False):
-        config_dict = read_yaml(os.path.join(root, 'cfg.yaml'))
+    def warm_startup(cls, in_path, gpu_index, best=False):
+        in_path = Path(in_path)
+        if in_path.is_dir():
+            config_dict = read_yaml(in_path.joinpath('cfg.yaml').as_posix())
+            root = in_path.as_posix()
+        else:
+            config_dict = read_yaml(in_path.parent.parent.joinpath('cfg.yaml').as_posix())
+            root = in_path.parent.parent.as_posix()
+
         config = TrainingConfiguration(**config_dict)
         cls = TorchTrainer(cfg=config, root=root, gpu_index=gpu_index)
         cls.init_nn()
-        cls.load_checkpoint(strict, best=best)
+        if best:
+            cp_path = os.path.join(root, 'checkpoints', 'checkpoint.pth')
+        else:
+            cp_path = os.path.join(root, 'checkpoints', 'last_checkpoint.pth')
+            if not os.path.exists(cp_path):
+                cp_path = os.path.join(root, 'checkpoints', 'checkpoint.pth')
+        cls.load_checkpoint(cp_path)
         return cls
 
     def init_nn(self):
@@ -134,24 +148,12 @@ class TorchTrainer:
         optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
-    def load_checkpoint(self, strict, best=False):
-        if best:
-            cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
-        else:
-            cp_path = os.path.join(self.root, 'checkpoints', 'last_checkpoint.pth')
-            if not os.path.exists(cp_path):
-                cp_path = os.path.join(self.root, 'checkpoints', 'checkpoint.pth')
+    def load_checkpoint(self, cp_path):
+
         print('loading checkpoint', cp_path)
         checkpoint = torch.load(cp_path, map_location=self.device)
         self.start_epoch = checkpoint['epoch']
-        self.model.load_state_dict(checkpoint['model_state_dict'], strict=strict)
-        # if not strict:
-        #     print('non strict', self.model.fine_tune_)
-        #     if self.model.fine_tune is not None and self.cfg.model.fine_tune_kargs is not None:
-        #         self.model.fine_tune(**self.cfg.model.fine_tune_kargs)
-        #     optim_cls = get_class(self.cfg.optimizer.type, module_path='torch.optim')
-        #     self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
-        # else:
+        self.model.load_state_dict(checkpoint['model_state_dict'], strict=True)
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         for state in self.optimizer.state.values():
             for k, v in state.items():
@@ -218,7 +220,7 @@ class TorchTrainer:
         ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=120)
         for epoch in ep_prog:
             if epoch % 50 == 0:
-                test_freq = max(int(-50 * np.log((epoch+1)/(self.cfg.model.epochs+1))), 1)
+                test_freq = max(int(-10 * np.log((epoch+1)/(self.cfg.model.epochs+1))), 1)
             self.model.train()
             for train_loader in train_meas.loaders:
                 prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
@@ -254,7 +256,7 @@ class TorchTrainer:
                 else:
                     self.save_checkpoint(better=False, epoch=epoch)
                 test_meas.epoch_step(epoch)
-            if epoch % 200 == 0:
+            if epoch % 500 == 0:
                 self.save_checkpoint(better=False, epoch=epoch, mid_checkpoint=True)
             if not self.running:
                 print()
