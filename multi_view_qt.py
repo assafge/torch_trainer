@@ -12,7 +12,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QGridLayout, QVBoxLayout, \
     QHBoxLayout, QGroupBox, QLabel, QComboBox, QInputDialog, QFileDialog, QLineEdit, \
-    QRadioButton, QButtonGroup
+    QRadioButton, QButtonGroup, QScrollArea
 
 
 @dataclass
@@ -166,15 +166,17 @@ class MainWin(QWidget):
         self.multi_view.setMinimumHeight(500)
         self.multi_layout = QGridLayout()
         self.multi_view.setLayout(self.multi_layout)
-        self.cfg_path = Path(__file__).parent.joinpath(cfg_path)
-        with self.cfg_path.open('r') as f:
-            self.cfg = yaml.safe_load(f)
+
+        with cfg_path.open('r') as f:
+            cfg = yaml.safe_load(f)
+            self.rows = cfg['rows']
+            self.input_cfg = cfg['inputs']
         self.main_layout = QHBoxLayout()
         self.setLayout(self.main_layout)
         self.main_layout.addWidget(self.multi_view)
         # splitter = QSplitter()
-        side_widget = QWidget(parent=self)
-        side_widget.setMaximumWidth(320)
+        side_widget = QScrollArea()
+        side_widget.setMaximumWidth(300)
         side_layout = QVBoxLayout()
         side_widget.setLayout(side_layout)
         side_layout.maximumSize()
@@ -209,7 +211,7 @@ class MainWin(QWidget):
 
         self.inputs: OrderedDict[str, ImageType] = collections.OrderedDict()
         self.radio_group = QButtonGroup(parent=self)
-        for im_name, im_params in self.cfg.items():
+        for im_name, im_params in self.input_cfg.items():
             cfg = ImageTypeCfg(**im_params)
             self.inputs[im_name] = ImageType(im_name, self.radio_group, side_layout, cfg)
             if len(self.inputs) == 1:
@@ -229,7 +231,7 @@ class MainWin(QWidget):
         if pressed and im_name != '':
             self.inputs[im_name] = ImageType(name=im_name, src_dir=in_dir.as_posix(), radio_group=self.radio_group,
                                              ext_layout=self.side_layout, action=None)
-        self.cfg[im_name] = {'path': in_dir.as_posix(), 'pattern': '*.png', 'action': 'rgb'}
+        self.input_cfg[im_name] = {'path': in_dir.as_posix(), 'pattern': '*.png', 'action': 'rgb'}
 
     def dec_input(self):
         if len(self.inputs) > 0:
@@ -240,10 +242,9 @@ class MainWin(QWidget):
             self.init_side_layout()
 
     def init_input(self):
-        rows = 2 if len(self.inputs) <= 8 else 3
-        cols = (len(self.inputs) // rows) + len(self.inputs) % rows
+        cols = (len(self.inputs) // self.rows) + len(self.inputs) % self.rows
         in_iter = iter(self.inputs.values())
-        for r in range(rows):
+        for r in range(self.rows):
             for c in range(cols):
                 try:
                     im_type: ImageType = next(in_iter)
@@ -300,7 +301,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     app = QApplication([])
-    cfg_path = Path(__file__).parent.joinpath(args.cfg_file)
-    assert cfg_path.exists(), f'failed to find input file {args.cfg_file} in {Path(__file__).parent}'
+    cfg_path = Path(args.cfg_file)
+    assert cfg_path.exists(), f'failed to find input file {args.cfg_file} '
     gui = MainWin(cfg_path)
     app.exec_()

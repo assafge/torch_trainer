@@ -1,8 +1,11 @@
+try:
+    from .general_utils import plot_confusion_matrix
+except ImportError:
+    from general_utils import plot_confusion_matrix
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import abc
-from general_utils import plot_confusion_matrix
 import random
 
 

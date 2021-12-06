@@ -1,12 +1,18 @@
-from general_utils import read_yaml, get_class
-from configuration_objects import TrainingConfiguration
+try:
+    from torch_trainer.general_utils import read_yaml, get_class
+    from torch_trainer.configuration_objects import TrainingConfiguration
+    from torch_trainer.traces import Trace
+except ModuleNotFoundError:
+    from general_utils import read_yaml, get_class
+    from configuration_objects import TrainingConfiguration
+    from traces import Trace
+
 import torch
 import os
 from shutil import rmtree
 from datetime import datetime
 from time import sleep
 from torch.utils.tensorboard import SummaryWriter
-from traces import Trace
 from typing import List
 import yaml
 from tqdm import tqdm, trange
@@ -196,7 +202,7 @@ class TorchTrainer:
             for loss_name, criterion in losses.items():
                 loss_cfg = self.cfg.model.loss[loss_name]
                 if 'Consistency' in criterion.__repr__(): # TODO fix it
-                    criteria.append(loss_cfg.factor * criterion(inputs, preds))
+                    criteria.append(loss_cfg.factor * criterion(inputs, preds, labels))
                 else:
                     if loss_cfg.im_channels is not None:
                         loss = loss_cfg.factor * criterion(preds[:, loss_cfg.im_channels], labels[:, loss_cfg.im_channels])
@@ -219,16 +225,16 @@ class TorchTrainer:
 
         ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=120)
         for epoch in ep_prog:
-            if epoch % 50 == 0:
-                test_freq = max(int(-10 * np.log((epoch+1)/(self.cfg.model.epochs+1))), 1)
+            if epoch % 100 == 0:
+                test_freq = max(int(-7 * np.log((epoch+1)/(self.cfg.model.epochs+1))), 1)
             self.model.train()
             for train_loader in train_meas.loaders:
                 prog = tqdm(train_loader, desc='train', leave=False, ncols=100)
                 for x, y in prog:
                     if self.running:
+                        self.optimizer.zero_grad()
                         inputs, labels = x.to(self.device), y.to(self.device)
                         outputs = self.model(inputs)
-                        self.optimizer.zero_grad()
                         losses = crit(inputs, outputs, labels)
                         loss = sum(losses)
                         loss.backward()
@@ -256,8 +262,8 @@ class TorchTrainer:
                 else:
                     self.save_checkpoint(better=False, epoch=epoch)
                 test_meas.epoch_step(epoch)
-            if epoch % 500 == 0:
-                self.save_checkpoint(better=False, epoch=epoch, mid_checkpoint=True)
+            # if epoch % 500 == 0:
+            #     self.save_checkpoint(better=False, epoch=epoch, mid_checkpoint=True)
             if not self.running:
                 print()
                 print('saving model and exiting...')

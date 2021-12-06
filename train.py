@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 import argparse
-from TorchTrainer import TorchTrainer
+try:
+    from torch_trainer.trainer import TorchTrainer
+except ModuleNotFoundError:
+    from trainer import TorchTrainer
 
 
 def get_args():

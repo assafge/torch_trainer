@@ -1,8 +1,14 @@
 #!/usr/bin/env python
+try:
+    from .trainer import TorchTrainer
+    from .image_utils import pad_2d, num_of_channels, mosaic_image
+    from .general_utils import print_progress
+except ImportError:
+    from trainer import TorchTrainer
+    from image_utils import pad_2d, num_of_channels, mosaic_image
+    from general_utils import print_progress
+
 import argparse
-from TorchTrainer import TorchTrainer
-# from time import time
-from image_utils import pad_2d, num_of_channels, mosaic_image
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +19,6 @@ from glob import glob
 # sys.path.append('../ISP')
 # import tabel_detect
 import scipy.io as sio
-from general_utils import print_progress
 # plt.switch_backend('tkagg')
 import colour_demosaicing
 import pandas as pd
@@ -24,6 +29,8 @@ from skimage.metrics import mean_squared_error as mse
 
 def crop_center(img, cropy, cropx, even_pos=True):
     y, x = img.shape[:2]
+    if (x, y) == (cropx, cropy):
+        return img
     cropy, cropx = min(cropy, img.shape[0]), min(cropx, img.shape[1])
     if even_pos:
         sx = x//2-(cropx//2)
@@ -49,6 +56,31 @@ def pred_to_img(preds: torch.Tensor):
     pred_np = pred_np.transpose((1, 2, 0))
     out_im = np.clip(pred_np, 0, 1)
     return (out_im * 255).astype(np.uint8)
+
+
+def run_model_image_tiles(trainer, in_img, out_channels, tile_div=3, divisor=32):
+    h, w = im_shape = np.array(in_img.shape[:2])
+    tile_shape = im_shape // tile_div
+    ty, tx = tile_shape = tile_shape - (tile_shape % divisor)
+    out_im = np.zeros((h, w, out_channels), dtype=np.uint8)
+
+    for iy in range(h//ty):
+        for ix in range(w//tx):
+            sy, ey = iy * ty, (iy + 1) * ty
+            sx, ex = ix * tx, (ix + 1) * tx
+            out_im[sy:ey, sx:ex] = pred_to_img(run_model(trainer, in_img[sy:ey, sx:ex]))
+    residue = im_shape % tile_shape
+    if np.sum(residue == 0) == 0:
+        iy += 1
+        sy, ey = iy * ty, min((iy + 1) * ty, h)
+        tile = pad_2d(in_img[sy:ey, 0:ex], divisor)
+        out_im[sy:ey, 0:ex] = crop_center(pred_to_img(run_model(trainer, tile)), ey-sy, ex)
+        ix += 1
+        sx, ex = ix * tx, min((ix + 1) * tx, w)
+        tile = pad_2d(in_img[0:ey, sx:ex], divisor)
+        out_im[0:ey, sx:ex] = crop_center(pred_to_img(run_model(trainer, tile)), ey, ex-sx)
+
+    return out_im
 
 
 def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = None, rotate: bool = False,
@@ -99,16 +131,7 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
             out_im = np.clip(out_np, -4, 10)
             out_im = ((out_im + 4) * (255 / 15)).astype(np.uint8)
     else:
-        h, w = im_shape = np.array(in_img.shape[:2])
-        tile_shape = im_shape // 3
-        ty, tx = tile_shape = tile_shape - (tile_shape % 2)
-        out_im = np.zeros((h, w, out_channels), dtype=np.uint8)
-
-        for iy in range(3):
-            for ix in range(3):
-                padded = pad_2d(in_img[iy*ty:(iy+1)*ty, ix*tx:(ix+1)*tx], divisor=32)
-                out_im[iy*ty:(iy+1)*ty, ix*tx:(ix+1)*tx] = crop_center(pred_to_img(run_model(trainer, padded)), ty, tx)
-
+        out_im = run_model_image_tiles(trainer, in_img, out_channels)
     if not do_crop and raw_result:
         out_im = preds.squeeze().cpu().numpy()
         out_im = out_im.transpose(1, 2, 0)
@@ -265,8 +288,9 @@ if __name__ == '__main__':
     trainer = TorchTrainer.warm_startup(in_path=args.model_path, gpu_index=args.gpu_index, best=True)
     trainer.model.eval()
 
-    if args.images_path:
-        assert args.im_pattern is not None, 'ERROR - please set image pattern argument'
+    if args.images_path is not None:
+        if len(args.images_path) == 1 and Path(args.images_path[0]).is_dir():
+            assert args.im_pattern is not None, 'ERROR - please set image pattern argument -m'
         # if args.ref_checker:
         #     ref = cv2.imread(args.ref_checker)
             # factors = tabel_detect.calc_factors(ref / ((2 ** args.bit_depth) - 1))
@@ -324,34 +348,34 @@ if __name__ == '__main__':
             if not Path(im_path.full).exists():
                 print('ERROR', im_path.full, 'is missing')
                 continue
-            out_im, in_img = inference_image(trainer, im_path=im_path.full,
-            rotate=args.rot90, raw_result=args.mat_out, do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr, boost=args.boost_image, do_mosaic=args.mosaic_images)
+            out_im, in_img = inference_image(trainer, im_path=im_path.full, rotate=args.rot90, raw_result=args.mat_out,
+                                             do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr,
+                                             boost=args.boost_image, do_mosaic=args.mosaic_images)
             ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+            rgb_est = out_im[..., :3]
             if out_im.shape[2] == 4:
-                multi_ir = False
                 ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
-            if out_im.shape[2] == 6:
-                multi_ir = True
+                ir_est = out_im[..., 3]
+                mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
+            elif out_im.shape[2] == 6 or out_im.shape[2] == 3:
+                if out_im.shape[2] == 6:
+                    ir_est = out_im[:, :, 3:]
+                else:
+                    ir_est = in_img - out_im
                 ref_ir = cv2.cvtColor(cv2.imread(im_path.ir), cv2.COLOR_BGR2RGB)
-            if multi_ir:
-                mse_rgb_ir.append((mse(ref_rgb, out_im[..., :3]), mse(ref_ir, out_im[:, :, 3:])))
-            else:
-                mse_rgb_ir.append((mse(ref_rgb, out_im[..., :3]), mse(ref_ir, out_im[:, :, 3])))
-            rgb_range = out_im[:, :, :3].max() - out_im[..., :3].min()
-            ir_range = out_im[..., 3:].max() - out_im[..., 3:].min()
-            if multi_ir:
-                ssim_rgb_ir.append((ssim(ref_rgb, out_im[..., :3], data_range=rgb_range, multichannel=True),
-                                ssim(ref_ir, out_im[..., 3:], data_range=ir_range, multichannel=multi_ir)))
-            else:
-                ssim_rgb_ir.append((ssim(ref_rgb, out_im[..., :3], data_range=rgb_range, multichannel=True),
-                                    ssim(ref_ir, out_im[..., 3], data_range=ir_range, multichannel=multi_ir)))
+                mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
+            ir_range = ir_est.max() - ir_est.min()
+            rgb_range = rgb_est.max() - rgb_est.min()
+            ssim_rgb_ir.append((ssim(ref_rgb, rgb_est, data_range=rgb_range, multichannel=True),
+                                ssim(ref_ir, ir_est, data_range=ir_range, multichannel=out_im.shape[2] != 4)))
             psnr_rgb_ir.append(10 * np.log10((255.0**2) / np.array(mse_rgb_ir[-1])))
             rgb_out = test_dir.joinpath(Path(im_path.rgb).stem + '_est.png')
             ir_out = test_dir.joinpath(Path(im_path.ir).stem + '_est.png')
-            cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(out_im[..., :3], cv2.COLOR_RGB2BGR))
-            if out_im.shape[2] == 6:
-                cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(out_im[..., 3:], cv2.COLOR_RGB2BGR))
-            cv2.imwrite(ir_out.as_posix(), out_im[..., 3:])
+            cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(rgb_est, cv2.COLOR_RGB2BGR))
+            if out_im.shape[2] == 4:
+                cv2.imwrite(ir_out.as_posix(), ir_est)
+            else:
+                cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(ir_est, cv2.COLOR_RGB2BGR))
         test_df[['mse_rgb', 'mse_ir']] = mse_rgb_ir
         test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
         test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir
