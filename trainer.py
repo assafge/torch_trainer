@@ -23,7 +23,6 @@ import signal
 from pathlib import Path
 
 
-
 class measurementObj:
     def __init__(self, loaders, writer_path, measurements=None, losses_names=None):
         if measurements is None:
@@ -155,7 +154,6 @@ class TorchTrainer:
         self.optimizer = optim_cls(self.model.parameters(), **self.cfg.optimizer.kargs)
 
     def load_checkpoint(self, cp_path):
-
         print('loading checkpoint', cp_path)
         checkpoint = torch.load(cp_path, map_location=self.device)
         self.start_epoch = checkpoint['epoch']
@@ -216,7 +214,6 @@ class TorchTrainer:
         self.running = False
 
     def train(self):
-        self.model.zero_grad()
         crit, loss_names = self.init_loss_func()
         train_meas, test_meas = self.init_measurements_obj(loss_names)
         best_loss = 2 ** 16

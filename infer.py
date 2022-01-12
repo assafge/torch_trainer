@@ -85,7 +85,7 @@ def run_model_image_tiles(trainer, in_img, out_channels, tile_div=3, divisor=32)
 
 def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = None, rotate: bool = False,
                     raw_result: bool = False, do_crop: bool = False, gray: bool = False, fliplr: bool = False,
-                    boost: bool = False, do_mosaic: bool = False):
+                    boost: bool = False, do_mosaic: bool = False, post_boost: bool = False):
     in_channels = trainer.cfg.model.in_channels
     out_channels = trainer.cfg.model.out_channels
     src = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
@@ -109,7 +109,7 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
         im_flt = im_flt * factors
 
     if boost:
-        p = np.percentile(im_flt, 98)
+        p = np.percentile(im_flt, 99)
         # print('p', p)
         im_flt = im_flt * (1/p)
     in_img = np.clip(im_flt, 0, 0.9999999)
@@ -139,6 +139,12 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
     if fliplr:
         out_im = np.fliplr(out_im)
         return_img = np.fliplr(return_img)
+    if post_boost:
+        # p = np.percentile(im_flt, 98)
+        # im_flt = out_im.astype(float) * 255/p
+        # print('p', p)
+
+        out_im = np.clip((out_im.astype(float) * 2.2), 0, 255).astype(np.uint8)
     return out_im, return_img
 
 
@@ -169,7 +175,7 @@ def save_image_type(img: np.ndarray, in_im_path: Path, out_dir: Path, mat_out: b
         sio.savemat(out_dir.joinpath(in_im_path.stem+'.mat'), {'dpt': img})
     else:
         out_path = out_dir.joinpath(in_im_path.stem)
-        save_color_image(img, out_path)
+        save_color_image(img, out_path, in_img)
 
 
 def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name: str, out_dir: str,
@@ -182,7 +188,7 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name
         out_name = out_path.as_posix() + '.mat'
         sio.savemat(out_name, {'dpt': img})
     else:
-        save_color_image(img, out_path)
+        save_color_image(img, out_path, in_img)
     if do_crop:
         if in_img.ndim > 2 and\
                 not os.path.exists(in_im_path.replace('.png', '_bilinear-demosaic_crop.png')):
@@ -192,18 +198,17 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name
             cv2.imwrite(in_im_path.replace('_crop.png', '_center_crop.png'), in_img)
 
 
-def save_color_image(img, out_path):
+def save_color_image(img, out_path, in_image):
     if img.ndim > 2:
+        rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
         if img.shape[2] == 4:
-            rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
             ir_im = img[:, :, 3]
-            cv2.imwrite(out_path.as_posix() + '_rgb_est.png', rgb_im)
-            cv2.imwrite(out_path.as_posix() + '_ir_est.png', ir_im)
         if img.shape[2] == 6:
-            rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
             ir_im = cv2.cvtColor(img[:, :, 3:], cv2.COLOR_RGB2BGR)
-            cv2.imwrite(out_path.as_posix() + '_rgb_est.png', rgb_im)
-            cv2.imwrite(out_path.as_posix() + '_ir_est.png', ir_im)
+        if img.shape[2] == 3:
+            ir_im = cv2.cvtColor(np.clip(in_image.astype(int) - rgb_im, 0, 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+        cv2.imwrite(out_path.as_posix() + '_rgb_est.png', rgb_im)
+        cv2.imwrite(out_path.as_posix() + '_ir_est.png', ir_im)
     else:
         out_im = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         # out_im = img
@@ -211,7 +216,7 @@ def save_color_image(img, out_path):
         cv2.imwrite(out_name, out_im)
 
 
-def display_result(gt_path, trainer, out_im: np.ndarray, in_img: np.ndarray, rot90, do_crop):
+def display_result(gt_path, out_im: np.ndarray, in_img: np.ndarray, rot90, do_crop):
     print(in_img.shape)
     if rot90:
         out_im = np.rot90(out_im)
@@ -272,7 +277,8 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--mat_out', action='store_true', default=False,
                         help='output the classification results (without argmax)')
     parser.add_argument('-m', '--im_pattern', default=None, help='images regex pattern')
-    parser.add_argument('-s', '--boost_image', action='store_true', help='auto gain per image')
+    parser.add_argument('-b', '--boost_image', action='store_true', help='pre auto gain per image')
+    parser.add_argument('-p', '--post_boost_image', action='store_true', help='post auto gain per image')
     parser.add_argument('-ti', '--test_images', action='store_true', help='infer test images')
     parser.add_argument('-mo', '--mosaic_images', action='store_true', help='perform mosaicing to input images')
 
@@ -285,100 +291,101 @@ if __name__ == '__main__':
 
 
     print('reading model...')
-    trainer = TorchTrainer.warm_startup(in_path=args.model_path, gpu_index=args.gpu_index, best=True)
-    trainer.model.eval()
+    with torch.no_grad():
+        trainer = TorchTrainer.warm_startup(in_path=args.model_path, gpu_index=args.gpu_index, best=True)
+        trainer.model.eval()
 
-    if args.images_path is not None:
-        if len(args.images_path) == 1 and Path(args.images_path[0]).is_dir():
-            assert args.im_pattern is not None, 'ERROR - please set image pattern argument -m'
-        # if args.ref_checker:
-        #     ref = cv2.imread(args.ref_checker)
-            # factors = tabel_detect.calc_factors(ref / ((2 ** args.bit_depth) - 1))
-            # print('INFO - factors:', factors)
-        if args.factors:
-            factors = np.array(args.factors)
-        else:
-            factors = None
-
-        model_name = os.path.basename(os.path.normpath(args.model_path))
-        images = []
-        for in_path_str in args.images_path:
-            in_path = Path(in_path_str)
-            if in_path.is_dir():
-                # given path is a directory
-                images.extend(in_path.glob(args.im_pattern))
-            elif in_path.suffix == '.txt':
-                with in_path.open() as f:
-                    for _ in range(15):
-                        images.append(f.readline().strip())
+        if args.images_path is not None:
+            if len(args.images_path) == 1 and Path(args.images_path[0]).is_dir():
+                assert args.im_pattern is not None, 'ERROR - please set image pattern argument -m'
+            # if args.ref_checker:
+            #     ref = cv2.imread(args.ref_checker)
+                # factors = tabel_detect.calc_factors(ref / ((2 ** args.bit_depth) - 1))
+                # print('INFO - factors:', factors)
+            if args.factors:
+                factors = np.array(args.factors)
             else:
-                images.append(in_path)
-        assert len(images) > 0, 'WARNING - images list is empty, check glob input: {}'.format(args.im_pattern)
-        for i, im_path in enumerate(images):
-            print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*20), length=20)
-            out_im, in_img = inference_image(trainer, im_path=im_path.as_posix(), factors=factors,
-                                             rotate=args.rot90, raw_result=args.mat_out,
-                                             do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr,
-                                             boost=args.boost_image, do_mosaic=args.mosaic_images)
+                factors = None
 
-            if args.out_type is not None:
-                out_dir = in_path.joinpath(args.out_type, model_name)
-                save_image_type(out_im, im_path, out_dir=out_dir, mat_out=args.mat_out)
-            elif args.out_path is not None:
-                save_image(out_im, in_img, im_path, model_name, args.out_path,
-                           mat_out=args.mat_out, do_crop=args.do_crop)
-                # save_image(in_img, im_path, 'org', args.out_path, mat_out=args.mat_out)
-            else:
-                display_result(gt_path=args.GT, trainer=trainer, out_im=out_im, in_img=in_img, rot90=args.rot90,
-                               do_crop=args.do_crop)
-        print_progress(len(images), total=len(images), suffix='inferenced {} images {}'.format(len(images), ' ' * 80), length=20)
-
-    elif args.random_images:
-        inference_random_patch(trainer, args.random_images)
-    elif args.test_images:
-        in_path = Path(args.model_path)
-        model_dir = in_path if in_path.is_dir() else in_path.parent.parent
-        test_df = pd.read_csv(model_dir.joinpath('test_images.csv'))
-        test_dir = model_dir.joinpath('test_images')
-        test_dir.mkdir(exist_ok=True)
-        mse_rgb_ir = []
-        ssim_rgb_ir = []
-        psnr_rgb_ir = []
-        for _, im_path in tqdm(test_df.iterrows()):
-            if not Path(im_path.full).exists():
-                print('ERROR', im_path.full, 'is missing')
-                continue
-            out_im, in_img = inference_image(trainer, im_path=im_path.full, rotate=args.rot90, raw_result=args.mat_out,
-                                             do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr,
-                                             boost=args.boost_image, do_mosaic=args.mosaic_images)
-            ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
-            rgb_est = out_im[..., :3]
-            if out_im.shape[2] == 4:
-                ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
-                ir_est = out_im[..., 3]
-                mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
-            elif out_im.shape[2] == 6 or out_im.shape[2] == 3:
-                if out_im.shape[2] == 6:
-                    ir_est = out_im[:, :, 3:]
+            model_name = os.path.basename(os.path.normpath(args.model_path))
+            images = []
+            for in_path_str in args.images_path:
+                in_path = Path(in_path_str)
+                if in_path.is_dir():
+                    # given path is a directory
+                    images.extend(in_path.glob(args.im_pattern))
+                elif in_path.suffix == '.txt':
+                    with in_path.open() as f:
+                        for _ in range(15):
+                            images.append(f.readline().strip())
                 else:
-                    ir_est = in_img - out_im
-                ref_ir = cv2.cvtColor(cv2.imread(im_path.ir), cv2.COLOR_BGR2RGB)
-                mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
-            ir_range = ir_est.max() - ir_est.min()
-            rgb_range = rgb_est.max() - rgb_est.min()
-            ssim_rgb_ir.append((ssim(ref_rgb, rgb_est, data_range=rgb_range, multichannel=True),
-                                ssim(ref_ir, ir_est, data_range=ir_range, multichannel=out_im.shape[2] != 4)))
-            psnr_rgb_ir.append(10 * np.log10((255.0**2) / np.array(mse_rgb_ir[-1])))
-            rgb_out = test_dir.joinpath(Path(im_path.rgb).stem + '_est.png')
-            ir_out = test_dir.joinpath(Path(im_path.ir).stem + '_est.png')
-            cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(rgb_est, cv2.COLOR_RGB2BGR))
-            if out_im.shape[2] == 4:
-                cv2.imwrite(ir_out.as_posix(), ir_est)
-            else:
-                cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(ir_est, cv2.COLOR_RGB2BGR))
-        test_df[['mse_rgb', 'mse_ir']] = mse_rgb_ir
-        test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
-        test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir
-        test_df.to_csv(model_dir.joinpath('test_images.csv'), index_label=False, index=False)
+                    images.append(in_path)
+            assert len(images) > 0, 'WARNING - images list is empty, check glob input: {}'.format(args.im_pattern)
+            for i, im_path in enumerate(images):
+                print_progress(i, total=len(images), suffix='inference {}{}'.format(im_path, ' '*20), length=20)
+                out_im, in_img = inference_image(trainer, im_path=im_path.as_posix(), factors=factors,
+                                                 rotate=args.rot90, raw_result=args.mat_out, do_crop=args.do_crop,
+                                                 gray=args.gray, fliplr=args.fliplr, boost=args.boost_image,
+                                                 do_mosaic=args.mosaic_images, post_boost=args.post_boost_image)
+
+                if args.out_type is not None:
+                    out_dir = in_path.joinpath(args.out_type, model_name)
+                    save_image_type(out_im, im_path, out_dir=out_dir, mat_out=args.mat_out)
+                elif args.out_path is not None:
+                    save_image(out_im, in_img, im_path, model_name, args.out_path,
+                               mat_out=args.mat_out, do_crop=args.do_crop)
+                    # save_image(in_img, im_path, 'org', args.out_path, mat_out=args.mat_out)
+                else:
+                    display_result(gt_path=args.GT, out_im=out_im, in_img=in_img, rot90=args.rot90,
+                                   do_crop=args.do_crop)
+            print_progress(len(images), total=len(images), suffix='inferenced {} images {}'.format(len(images), ' ' * 80), length=20)
+
+        elif args.random_images:
+            inference_random_patch(trainer, args.random_images)
+        elif args.test_images:
+            in_path = Path(args.model_path)
+            model_dir = in_path if in_path.is_dir() else in_path.parent.parent
+            test_df = pd.read_csv(model_dir.joinpath('test_images.csv'))
+            test_dir = model_dir.joinpath('test_images')
+            test_dir.mkdir(exist_ok=True)
+            mse_rgb_ir = []
+            ssim_rgb_ir = []
+            psnr_rgb_ir = []
+            for _, im_path in tqdm(test_df.iterrows()):
+                if not Path(im_path.full).exists():
+                    print('ERROR', im_path.full, 'is missing')
+                    continue
+                out_im, in_img = inference_image(trainer, im_path=im_path.full, rotate=args.rot90, raw_result=args.mat_out,
+                                                 do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr,
+                                                 boost=args.boost_image, do_mosaic=args.mosaic_images)
+                ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+                rgb_est = out_im[..., :3]
+                if out_im.shape[2] == 4:
+                    ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
+                    ir_est = out_im[..., 3]
+                    mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
+                elif out_im.shape[2] == 6 or out_im.shape[2] == 3:
+                    if out_im.shape[2] == 6:
+                        ir_est = out_im[:, :, 3:]
+                    else:
+                        ir_est = in_img - out_im
+                    ref_ir = cv2.cvtColor(cv2.imread(im_path.ir), cv2.COLOR_BGR2RGB)
+                    mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
+                ir_range = ir_est.max() - ir_est.min()
+                rgb_range = rgb_est.max() - rgb_est.min()
+                ssim_rgb_ir.append((ssim(ref_rgb, rgb_est, data_range=rgb_range, multichannel=True),
+                                    ssim(ref_ir, ir_est, data_range=ir_range, multichannel=out_im.shape[2] != 4)))
+                psnr_rgb_ir.append(10 * np.log10((255.0**2) / np.array(mse_rgb_ir[-1])))
+                rgb_out = test_dir.joinpath(Path(im_path.rgb).stem + '_est.png')
+                ir_out = test_dir.joinpath(Path(im_path.ir).stem + '_est.png')
+                cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(rgb_est, cv2.COLOR_RGB2BGR))
+                if out_im.shape[2] == 4:
+                    cv2.imwrite(ir_out.as_posix(), ir_est)
+                else:
+                    cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(ir_est, cv2.COLOR_RGB2BGR))
+            test_df[['mse_rgb', 'mse_ir']] = mse_rgb_ir
+            test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
+            test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir
+            test_df.to_csv(model_dir.joinpath('test_images.csv'), index_label=False, index=False)
 
 
