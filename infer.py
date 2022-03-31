@@ -15,29 +15,24 @@ import numpy as np
 import torch
 import os.path
 from pathlib import Path
-from glob import glob
-# sys.path.append('../ISP')
-# import tabel_detect
 import scipy.io as sio
-# plt.switch_backend('tkagg')
-import colour_demosaicing
 import pandas as pd
 from tqdm import tqdm
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import mean_squared_error as mse
 
 
-def crop_center(img, cropy, cropx, even_pos=True):
+def crop_center(img, crop_y, crop_x, even_pos=True):
     y, x = img.shape[:2]
-    if (x, y) == (cropx, cropy):
+    if (x, y) == (crop_x, crop_y):
         return img
-    cropy, cropx = min(cropy, img.shape[0]), min(cropx, img.shape[1])
+    crop_y, crop_x = min(crop_y, img.shape[0]), min(crop_x, img.shape[1])
+    sx = x // 2 - (crop_x // 2)
+    sy = y // 2 - (crop_y // 2)
     if even_pos:
-        sx = x//2-(cropx//2)
         sx -= sx % 2
-        sy = y//2-(cropy//2)
         sy -= sy % 2
-    return img[sy:sy+cropy, sx:sx+cropx]
+    return img[sy:sy + crop_y, sx:sx + crop_x]
 
 
 def run_model(trainer, in_img):
@@ -50,7 +45,7 @@ def run_model(trainer, in_img):
         return trainer.model(inputs)
 
 
-def pred_to_img(preds: torch.Tensor):
+def predictions_to_img(preds: torch.Tensor):
     pred_np = preds.cpu().numpy()
     pred_np = np.squeeze(pred_np, axis=0)
     pred_np = pred_np.transpose((1, 2, 0))
@@ -58,43 +53,45 @@ def pred_to_img(preds: torch.Tensor):
     return (out_im * 255).astype(np.uint8)
 
 
-def run_model_image_tiles(trainer, in_img, out_channels, tile_div=3, divisor=32):
+def run_model_image_tiles(trainer, in_img, out_channels, tile_div=2, divisor=32):
     h, w = im_shape = np.array(in_img.shape[:2])
     tile_shape = im_shape // tile_div
-    ty, tx = tile_shape = tile_shape - (tile_shape % divisor)
+    ty, tx = tile_shape - (tile_shape % divisor)
     out_im = np.zeros((h, w, out_channels), dtype=np.uint8)
 
     for iy in range(h//ty):
         for ix in range(w//tx):
             sy, ey = iy * ty, (iy + 1) * ty
             sx, ex = ix * tx, (ix + 1) * tx
-            out_im[sy:ey, sx:ex] = pred_to_img(run_model(trainer, in_img[sy:ey, sx:ex]))
-    residue = im_shape % tile_shape
-    if np.sum(residue == 0) == 0:
-        iy += 1
-        sy, ey = iy * ty, min((iy + 1) * ty, h)
-        tile = pad_2d(in_img[sy:ey, 0:ex], divisor)
-        out_im[sy:ey, 0:ex] = crop_center(pred_to_img(run_model(trainer, tile)), ey-sy, ex)
-        ix += 1
-        sx, ex = ix * tx, min((ix + 1) * tx, w)
-        tile = pad_2d(in_img[0:ey, sx:ex], divisor)
-        out_im[0:ey, sx:ex] = crop_center(pred_to_img(run_model(trainer, tile)), ey, ex-sx)
+            out_im[sy:ey, sx:ex] = predictions_to_img(run_model(trainer, in_img[sy:ey, sx:ex]))
+    if h % ty != 0:
+        iy = h//ty
+        ix = w // tx
+        sy, ey = iy * ty, h - 1
+        sx, ex = 0, ix * tx
+        tile = pad_2d(in_img[sy:ey, sx:ex], divisor)
+        preds = predictions_to_img(run_model(trainer, tile))
+        out_im[sy:ey, sx:ex] = crop_center(preds, ey - sy, ex - sx, even_pos=False)
+    if w % tx != 0:
+        ix = w // tx
+        sy, ey = 0, h-1
+        sx, ex = ix * tx, w-1
+        tile = pad_2d(in_img[sy:ey, sx:ex], divisor)
+        preds = predictions_to_img(run_model(trainer, tile))
+        out_im[sy:ey, sx:ex] = crop_center(preds, ey - sy, ex - sx, even_pos=False)
 
     return out_im
 
 
 def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = None, rotate: bool = False,
                     raw_result: bool = False, do_crop: bool = False, gray: bool = False, fliplr: bool = False,
-                    boost: bool = False, do_mosaic: bool = False, post_boost: bool = False):
+                    boost: bool = False, do_mosaic: bool = False, post_boost: bool = False, pattern='rggb'):
     in_channels = trainer.cfg.model.in_channels
     out_channels = trainer.cfg.model.out_channels
     src = cv2.imread(im_path, cv2.IMREAD_UNCHANGED)
     max_bit = (2 ** 16) - 1 if src.dtype == np.uint16 else 255
     if in_channels == 3 and src.ndim == 2 and not gray:
-        # im_raw = colour_demosaicing.demosaicing_CFA_Bayer_bilinear(src, pattern='RGGB')
         im_raw = cv2.demosaicing(src, cv2.COLOR_BAYER_BG2RGB)
-        # ratio = im_raw.max() / src.max()
-        # im_flt = im_raw / max_bit
         im_flt = (im_raw / max_bit).astype(np.float32)
 
     elif src.ndim > 2 and src.shape[2] == 3:
@@ -102,7 +99,7 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
     else:
         im_flt = src.astype(np.float32) / max_bit
     if do_mosaic:
-        im_flt = mosaic_image(im_flt, pattern='rggb')
+        im_flt = mosaic_image(im_flt, pattern=pattern)
     if fliplr:
         im_flt = np.fliplr(im_flt)
     if factors is not None:
@@ -112,11 +109,12 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
         p = np.percentile(im_flt, 99)
         # print('p', p)
         im_flt = im_flt * (1/p)
-    in_img = np.clip(im_flt, 0, 0.9999999)
+    in_img = np.clip(im_flt, 0, 1.0)
     if rotate:
         in_img = np.rot90(in_img)
     return_img = (in_img * 255).astype(np.uint8)
     if not do_crop:
+        h, w = in_img.shape[:2]
         in_img = pad_2d(in_img, 32)
         preds = run_model(trainer, in_img)
         if preds.ndim > 3 and preds.shape[1] > 7:  # segmentation
@@ -125,17 +123,17 @@ def inference_image(trainer: TorchTrainer, im_path: str, factors: np.ndarray = N
             out_im = out_im.astype(np.uint8)
 
         elif preds.ndim > 2:  # im2im
-            out_im = pred_to_img(preds)
+            out_im = predictions_to_img(preds)
         else:
             out_np = preds.squeeze().cpu().numpy()
             out_im = np.clip(out_np, -4, 10)
             out_im = ((out_im + 4) * (255 / 15)).astype(np.uint8)
+        out_im = crop_center(out_im, h, w, even_pos=False)
+        if raw_result:
+            out_im = preds.squeeze().cpu().numpy()
+            out_im = out_im.transpose(1, 2, 0)
     else:
         out_im = run_model_image_tiles(trainer, in_img, out_channels)
-    if not do_crop and raw_result:
-        out_im = preds.squeeze().cpu().numpy()
-        out_im = out_im.transpose(1, 2, 0)
-
     if fliplr:
         out_im = np.fliplr(out_im)
         return_img = np.fliplr(return_img)
@@ -178,8 +176,7 @@ def save_image_type(img: np.ndarray, in_im_path: Path, out_dir: Path, mat_out: b
         save_color_image(img, out_path, in_img)
 
 
-def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name: str, out_dir: str,
-               mat_out: bool, do_crop: bool):
+def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name: str, mat_out: bool, do_crop: bool):
     p = Path(in_im_path)
     out_path = p.parent.joinpath(p.stem + '_' + model_name)
     if not p.parent.is_dir():
@@ -190,12 +187,13 @@ def save_image(img: np.ndarray, in_img: np.ndarray, in_im_path: Path, model_name
     else:
         save_color_image(img, out_path, in_img)
     if do_crop:
-        if in_img.ndim > 2 and\
-                not os.path.exists(in_im_path.replace('.png', '_bilinear-demosaic_crop.png')):
+        # out_path = in_im_path.with_name(in_im_path.stem + '_bilinear-demosaic_crop.png')
+        crop_out_path = in_im_path.with_name(in_im_path.stem + '_bilinear-demosaic_crop.png')
+        if in_img.ndim > 2 and not out_path.exists():
             in_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(in_im_path.replace('.png', '_bilinear-demosaic_crop.png'), in_img)
-        if not os.path.exists(in_im_path.replace('_crop.png', '_center_crop.png')):
-            cv2.imwrite(in_im_path.replace('_crop.png', '_center_crop.png'), in_img)
+        # cv2.imwrite(out_path.as_posix(), in_img)
+        if not crop_out_path.exists():
+            cv2.imwrite(crop_out_path.as_posix(), in_img)
 
 
 def save_color_image(img, out_path, in_image):
@@ -203,9 +201,9 @@ def save_color_image(img, out_path, in_image):
         rgb_im = cv2.cvtColor(img[:, :, :3], cv2.COLOR_RGB2BGR)
         if img.shape[2] == 4:
             ir_im = img[:, :, 3]
-        if img.shape[2] == 6:
+        elif img.shape[2] == 6:
             ir_im = cv2.cvtColor(img[:, :, 3:], cv2.COLOR_RGB2BGR)
-        if img.shape[2] == 3:
+        else:  # img.shape[2] == 3:
             ir_im = cv2.cvtColor(np.clip(in_image.astype(int) - rgb_im, 0, 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
         cv2.imwrite(out_path.as_posix() + '_rgb_est.png', rgb_im)
         cv2.imwrite(out_path.as_posix() + '_ir_est.png', ir_im)
@@ -216,8 +214,9 @@ def save_color_image(img, out_path, in_image):
         cv2.imwrite(out_name, out_im)
 
 
+# noinspection PyTypeChecker
 def display_result(gt_path, out_im: np.ndarray, in_img: np.ndarray, rot90, do_crop):
-    print(in_img.shape)
+    gt = None
     if rot90:
         out_im = np.rot90(out_im)
         in_img = np.rot90(in_img)
@@ -245,7 +244,7 @@ def display_result(gt_path, out_im: np.ndarray, in_img: np.ndarray, rot90, do_cr
     axes[1].set_title('out')
     cv2.imwrite('rgb.png', cv2.cvtColor(out_im[:, :, :3], cv2.COLOR_RGB2BGR))
     if cols >= 3:
-        if gt_path:
+        if gt is not None:
             axes[2].imshow(gt), axes[2].set_title('GT')
     if out_im.shape[2] == 4:
         axes[-1].imshow(out_im[:, :, 3], cmap='gray'), axes[-1].set_title('IR')
@@ -288,8 +287,6 @@ if __name__ == '__main__':
     if not args.test_images:
         for in_path in args.images_path:
             assert os.path.exists(in_path), 'ERROR - path is not exist %s' % in_path
-
-
     print('reading model...')
     with torch.no_grad():
         trainer = TorchTrainer.warm_startup(in_path=args.model_path, gpu_index=args.gpu_index, best=True)
@@ -328,17 +325,17 @@ if __name__ == '__main__':
                                                  gray=args.gray, fliplr=args.fliplr, boost=args.boost_image,
                                                  do_mosaic=args.mosaic_images, post_boost=args.post_boost_image)
 
-                if args.out_type is not None:
-                    out_dir = in_path.joinpath(args.out_type, model_name)
+                if args.out_type is not None and Path(args.images_path[0]).is_dir():
+                    out_dir = Path(args.images_path[0]).joinpath(args.out_type, model_name)
                     save_image_type(out_im, im_path, out_dir=out_dir, mat_out=args.mat_out)
                 elif args.out_path is not None:
-                    save_image(out_im, in_img, im_path, model_name, args.out_path,
-                               mat_out=args.mat_out, do_crop=args.do_crop)
+                    save_image(out_im, in_img, im_path, model_name, args.out_path, do_crop=args.do_crop)
                     # save_image(in_img, im_path, 'org', args.out_path, mat_out=args.mat_out)
                 else:
                     display_result(gt_path=args.GT, out_im=out_im, in_img=in_img, rot90=args.rot90,
                                    do_crop=args.do_crop)
-            print_progress(len(images), total=len(images), suffix='inferenced {} images {}'.format(len(images), ' ' * 80), length=20)
+            print_progress(len(images), total=len(images),
+                           suffix='inference {} images {}'.format(len(images), ' ' * 80), length=20)
 
         elif args.random_images:
             inference_random_patch(trainer, args.random_images)
@@ -355,9 +352,10 @@ if __name__ == '__main__':
                 if not Path(im_path.full).exists():
                     print('ERROR', im_path.full, 'is missing')
                     continue
-                out_im, in_img = inference_image(trainer, im_path=im_path.full, rotate=args.rot90, raw_result=args.mat_out,
-                                                 do_crop=args.do_crop, gray=args.gray, fliplr=args.fliplr,
-                                                 boost=args.boost_image, do_mosaic=args.mosaic_images)
+                out_im, in_img = inference_image(trainer, im_path=im_path.full, rotate=args.rot90,
+                                                 raw_result=args.mat_out, do_crop=args.do_crop, gray=args.gray,
+                                                 fliplr=args.fliplr, boost=args.boost_image,
+                                                 do_mosaic=args.mosaic_images)
                 ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
                 rgb_est = out_im[..., :3]
                 if out_im.shape[2] == 4:
@@ -368,6 +366,8 @@ if __name__ == '__main__':
                     if out_im.shape[2] == 6:
                         ir_est = out_im[:, :, 3:]
                     else:
+                        if in_img.shape != out_im.shape:
+                            print('k')
                         ir_est = in_img - out_im
                     ref_ir = cv2.cvtColor(cv2.imread(im_path.ir), cv2.COLOR_BGR2RGB)
                     mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
@@ -387,5 +387,3 @@ if __name__ == '__main__':
             test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
             test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir
             test_df.to_csv(model_dir.joinpath('test_images.csv'), index_label=False, index=False)
-
-

@@ -281,6 +281,7 @@ class MainWin(QWidget):
                 base_name = next(self.im_gen)
             except StopIteration:
                 return
+        print(base_name)
         for im_type in self.inputs.values():
             if not im_type.display_image(base_name):
                 print(f'failed to find image in {im_type.name}')

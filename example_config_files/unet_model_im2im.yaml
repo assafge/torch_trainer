@@ -6,10 +6,8 @@ in_channels: &in_ch 3
 out_channels: &out_c 3
 kargs:
     n_channels: *in_ch
-#    n_classes: 16
     n_classes: *out_c
     scale_channels: 64
-#    scale_channels: 32
 #loss: CrossEntropyLoss # SmoothL1Loss
 loss:
     MS_SSIM_Loss:
@@ -22,20 +20,9 @@ loss:
         kargs:
             reduction: mean
             #mix_alpha: 0.84
-
-#    ignore_index: 0
-#    reduction: mean
-
 test_traces:
-#    pixelwize_accuracy:
-#        path: ./traces.py
-#        type: PixelWiseAccuracy
-#    quazipixelwize_accuracy:
-#        path: ./traces.py
-#        type: QuaziPixelWiseAccuracy
     image_trace:
         path: ./traces.py
         type: ImageTrace
-
 train_traces:
 

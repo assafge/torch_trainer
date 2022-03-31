@@ -262,7 +262,6 @@ class TorchTrainer:
             # if epoch % 500 == 0:
             #     self.save_checkpoint(better=False, epoch=epoch, mid_checkpoint=True)
             if not self.running:
-                print()
                 print('saving model and exiting...')
                 self.save_checkpoint(False, epoch - 1)
                 return
