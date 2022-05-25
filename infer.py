@@ -342,48 +342,14 @@ if __name__ == '__main__':
         elif args.test_images:
             in_path = Path(args.model_path)
             model_dir = in_path if in_path.is_dir() else in_path.parent.parent
-            test_df = pd.read_csv(model_dir.joinpath('test_images.csv'))
-            test_dir = model_dir.joinpath('test_images')
-            test_dir.mkdir(exist_ok=True)
-            mse_rgb_ir = []
-            ssim_rgb_ir = []
-            psnr_rgb_ir = []
-            for _, im_path in tqdm(test_df.iterrows()):
-                if not Path(im_path.full).exists():
-                    print('ERROR', im_path.full, 'is missing')
-                    continue
-                out_im, in_img = inference_image(trainer, im_path=im_path.full, rotate=args.rot90,
+            out_path = model_dir.joinpath('test_images')
+            if not out_path.exists():
+                out_path.mkdir(parents=True)
+            test_images = trainer.dataset.get_test_images()
+            for im_path in tqdm(test_images):
+                out_im, in_img = inference_image(trainer, im_path=str(im_path), rotate=args.rot90,
                                                  raw_result=args.mat_out, do_crop=args.do_crop, gray=args.gray,
                                                  fliplr=args.fliplr, boost=args.boost_image,
                                                  do_mosaic=args.mosaic_images)
-                ref_rgb = cv2.cvtColor(cv2.imread(im_path.rgb, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
-                rgb_est = out_im[..., :3]
-                if out_im.shape[2] == 4:
-                    ref_ir = cv2.imread(im_path.ir, cv2.IMREAD_GRAYSCALE)
-                    ir_est = out_im[..., 3]
-                    mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
-                elif out_im.shape[2] == 6 or out_im.shape[2] == 3:
-                    if out_im.shape[2] == 6:
-                        ir_est = out_im[:, :, 3:]
-                    else:
-                        if in_img.shape != out_im.shape:
-                            print('k')
-                        ir_est = in_img - out_im
-                    ref_ir = cv2.cvtColor(cv2.imread(im_path.ir), cv2.COLOR_BGR2RGB)
-                    mse_rgb_ir.append((mse(ref_rgb, rgb_est), mse(ref_ir, ir_est)))
-                ir_range = ir_est.max() - ir_est.min()
-                rgb_range = rgb_est.max() - rgb_est.min()
-                ssim_rgb_ir.append((ssim(ref_rgb, rgb_est, data_range=rgb_range, multichannel=True),
-                                    ssim(ref_ir, ir_est, data_range=ir_range, multichannel=out_im.shape[2] != 4)))
-                psnr_rgb_ir.append(10 * np.log10((255.0**2) / np.array(mse_rgb_ir[-1])))
-                rgb_out = test_dir.joinpath(Path(im_path.rgb).stem + '_est.png')
-                ir_out = test_dir.joinpath(Path(im_path.ir).stem + '_est.png')
-                cv2.imwrite(rgb_out.as_posix(), cv2.cvtColor(rgb_est, cv2.COLOR_RGB2BGR))
-                if out_im.shape[2] == 4:
-                    cv2.imwrite(ir_out.as_posix(), ir_est)
-                else:
-                    cv2.imwrite(ir_out.as_posix(), cv2.cvtColor(ir_est, cv2.COLOR_RGB2BGR))
-            test_df[['mse_rgb', 'mse_ir']] = mse_rgb_ir
-            test_df[['ssim_rgb', 'ssim_ir']] = ssim_rgb_ir
-            test_df[['psnr_rgb', 'psnr_ir']] = psnr_rgb_ir
-            test_df.to_csv(model_dir.joinpath('test_images.csv'), index_label=False, index=False)
+                trainer.dataset.save_results(im_path, out_im, in_img, out_path)
+

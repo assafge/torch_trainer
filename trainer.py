@@ -219,10 +219,10 @@ class TorchTrainer:
         best_loss = 2 ** 16
         self.running = True
         signal.signal(signal.SIGINT, self.signal_handler)
-
+        test_freq = -1 # init for warm startup
         ep_prog = trange(self.start_epoch, self.cfg.model.epochs, desc='epochs', ncols=120)
         for epoch in ep_prog:
-            if epoch % 100 == 0:
+            if epoch % 100 == 0 or test_freq == -1:
                 test_freq = max(int(-7 * np.log((epoch+1)/(self.cfg.model.epochs+1))), 1)
             self.model.train()
             for train_loader in train_meas.loaders:
