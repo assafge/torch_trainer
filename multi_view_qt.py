@@ -66,6 +66,7 @@ class ImageTypeView(QGroupBox):
         self.src_dir = Path(cfg.path)
         self.files: Dict[str, Path] = []
         self.convert = None
+        self.name = name
         # UI
         layout = QVBoxLayout(self)
         self.setLayout(layout)
@@ -112,7 +113,8 @@ class ImageTypeView(QGroupBox):
             self.vb.autoRange()
         else:
             self.it.setImage(np.zeros((500, 500, 3), dtype=np.uint8))
-            self.vb.autoRange()
+            # self.vb.autoRange()
+            print(f'{self.name}: {im_base_name} not found in {list(self.files.values())}')
 
 
 class MainWin(QWidget):
@@ -152,6 +154,7 @@ class MainWin(QWidget):
     def set_image(self, ind):
         for im_name, im_view in self.inputs.items():
             im_view.display_image(self.base_names[ind])
+        self.setWindowTitle(self.base_names[ind])
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Right and self.ind < len(self.base_names) - 1:
