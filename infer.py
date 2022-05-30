@@ -9,17 +9,15 @@ except ImportError:
     from general_utils import print_progress
 
 import argparse
+import os.path
+from pathlib import Path
+
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
-import os.path
-from pathlib import Path
 import scipy.io as sio
-import pandas as pd
+import torch
 from tqdm import tqdm
-from skimage.metrics import structural_similarity as ssim
-from skimage.metrics import mean_squared_error as mse
 
 
 def crop_center(img, crop_y, crop_x, even_pos=True):
@@ -326,8 +324,11 @@ if __name__ == '__main__':
                                                  do_mosaic=args.mosaic_images, post_boost=args.post_boost_image)
 
                 if args.out_type is not None and Path(args.images_path[0]).is_dir():
-                    out_dir = Path(args.images_path[0]).joinpath(args.out_type, model_name)
-                    save_image_type(out_im, im_path, out_dir=out_dir, mat_out=args.mat_out)
+                    if args.out_type != '':
+                        out_dir = Path(args.images_path[0]).joinpath(args.out_type , model_name)
+                    else:
+                        out_dir = Path(args.images_path[0]).joinpath(model_name)
+                    trainer.dataset.save_results(im_path, out_im, in_img, out_dir)
                 elif args.out_path is not None:
                     save_image(out_im, in_img, im_path, model_name, args.out_path, do_crop=args.do_crop)
                     # save_image(in_img, im_path, 'org', args.out_path, mat_out=args.mat_out)
